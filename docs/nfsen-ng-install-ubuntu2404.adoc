@@ -6,7 +6,7 @@
 :source-highlighter: highlight.js
 :experimental:
 :author: netflowAgent
-:revdate: 2026-07-01
+:revdate: 2026-07-04
 
 == Назначение документа
 
@@ -18,8 +18,8 @@
 
 [source,text]
 ----
-  win-pc01 (Perl-агент)  ──IPFIX UDP :9995──►  nfcapd → live/win-pc01/
-  ubuntu-pc01 (агент)    ──IPFIX UDP :9996──►  nfcapd → live/ubuntu-pc01/
+  win-pc01 (netflowAgent)  ──NetFlow v9 UDP :9995──►  nfcapd → live/win-pc01/
+  ubuntu-pc01 (агент)      ──NetFlow v9 UDP :9996──►  nfcapd → live/ubuntu-pc01/
                               │
                               ▼
                     nfsen-ng (Docker) → браузер :9000
@@ -38,9 +38,9 @@
 |===
 | Компонент | Где работает | Роль
 
-| Perl-агент (ваш проект)
+| netflowAgent (Rust)
 | Windows / Ubuntu endpoint
-| Сбор трафика, экспорт IPFIX по UDP
+| Сбор трафика, экспорт NetFlow v9 по UDP
 
 | `nfcapd`
 | Ubuntu-коллектор (хост, не Docker)
@@ -296,19 +296,31 @@ nano docker-compose.yml
 
 [source,yaml]
 ----
-    image: ghcr.io/mbolli/nfsen-ng:1.0.0-RC.1
+    image: ghcr.io/mbolli/nfsen-ng:edge
 ----
 
-Альтернатива — последняя сборка с master:
+[IMPORTANT]
+====
+Для часового пояса *не UTC* (например `Europe/Moscow`, UTC+3) используйте **`edge`**, а не `1.0.0-RC.1`.
+
+В `1.0.0-RC.1` есть баг: nfsen-ng парсит имена файлов `nfcapd.*` как UTC, хотя `nfcapd` на хосте пишет их в *локальном* времени. Симптомы:
+
+* в Flows/Statistics команда `nfdump -R` уходит на **−3 ч** (выбрали 22:43 → в `-R` попало `19:40`);
+* пустые графики и «No data available», хотя в терминале `nfdump -r ...` flows есть.
+
+Исправление в upstream: link:https://github.com/mbolli/nfsen-ng/issues/145[#145] (май 2026, master / `edge`).
+====
+
+Альтернатива — зафиксированный RC (без фикса TZ):
 
 [source,yaml]
 ----
-    image: ghcr.io/mbolli/nfsen-ng:edge
+    image: ghcr.io/mbolli/nfsen-ng:1.0.0-RC.1
 ----
 
 [NOTE]
 ====
-Если `docker compose pull` выдаёт `not found` для `:latest` — причина именно в теге. После смены на `1.0.0-RC.1` или `edge` pull заработает.
+Если `docker compose pull` выдаёт `not found` для `:latest` — причина именно в теге. После смены на `edge` или `1.0.0-RC.1` pull заработает.
 ====
 
 ==== 2. Удалить переопределение `entrypoint` (важно)
@@ -372,19 +384,47 @@ Restarting...
 
 Список TCP/UDP-портов, по которым nfsen-ng строит отдельные RRD-графики.
 
-==== 6. Часовой пояс (рекомендуется)
+==== 6. Часовой пояс (обязательно для MSK / UTC+3)
+
+`nfcapd` на хосте Ubuntu создаёт файлы `nfcapd.YYYYMMDDHHMM` в *локальном* времени сервера (у нас — `Europe/Moscow`).
+
+После фикса в `edge` (issue link:https://github.com/mbolli/nfsen-ng/issues/145[#145]) в `docker-compose.yml` у сервиса `nfsen` задайте:
 
 [source,yaml]
 ----
-      - TZ=Europe/Moscow
+      - TZ=UTC
+      - NFCAPD_TZ=Europe/Moscow
 ----
 
-Если `nfcapd` на хосте работает в том же часовом поясе, что и контейнер, переменная `NFCAPD_TZ` не нужна. Если nfcapd в локальном времени хоста, а контейнер в UTC — добавьте:
+[cols="1,2", options="header"]
+|===
+| Переменная | Назначение
 
-[source,yaml]
+| `TZ=UTC`
+| Внутреннее время контейнера и PHP (как рекомендует upstream после переписывания TZ в 2026).
+
+| `NFCAPD_TZ=Europe/Moscow`
+| Часовой пояс, в котором *именуются* файлы `nfcapd.*` на хосте. Должен совпадать с `timedatectl` на коллекторе (`Europe/Moscow`).
+
+|===
+
+Проверка после `docker compose up -d --force-recreate`:
+
+[source,bash]
 ----
-      # - NFCAPD_TZ=Europe/Moscow
+date
+timedatectl | grep "Time zone"
+docker compose exec nfsen env | grep -E 'TZ|NFCAPD'
 ----
+
+Ожидаемо на хосте: `Europe/Moscow`; в контейнере: `TZ=UTC`, `NFCAPD_TZ=Europe/Moscow`.
+
+[WARNING]
+====
+*Не используйте* только `TZ=Europe/Moscow` без `NFCAPD_TZ` на образе `1.0.0-RC.1` — UI будет искать данные со сдвигом −3 ч, графики и Flows останутся пустыми.
+
+После смены образа на `edge` и добавления `NFCAPD_TZ` выполните <<переимпорт-rrd,переимпорт RRD>> — старые RRD могли сохранить неверные метки времени.
+====
 
 === Что можно не менять
 
@@ -401,17 +441,29 @@ Restarting...
 
 Для стандартной установки *не требуется*. Достаточно переменных окружения в `docker-compose.yml`. Файл настроек нужен только для сложных сценариев (много фильтров, VictoriaMetrics и т.д.).
 
-=== Пример минимального фрагмента `environment`
+=== Пример фрагмента сервиса `nfsen` (проверено на Ubuntu 24.04, MSK)
+
+Имя сервиса в compose — **`nfsen`** (контейнер при этом может называться `nfsen-ng`).
 
 [source,yaml]
 ----
+  nfsen:
+    image: ghcr.io/mbolli/nfsen-ng:edge
+    container_name: nfsen-ng
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    volumes:
+      - /var/nfdump/profiles-data:/data/nfsen-ng
     environment:
-      - TZ=Europe/Moscow
+      - TZ=UTC
+      - NFCAPD_TZ=Europe/Moscow
       - NFSEN_SOURCES=win-pc01,ubuntu-pc01
       - NFSEN_PORTS=80,443,22,53
       - NFSEN_NFDUMP_BINARY=/usr/local/nfdump/bin/nfdump
       - NFSEN_NFDUMP_PROFILES=/data/nfsen-ng
-      - NFSEN_LOG_LEVEL=INFO (Раскомментируйте)
+      # - NFSEN_LOG_LEVEL=INFO
+    # entrypoint: НЕ переопределять — см. шаг 4.2
 ----
 
 == Шаг 5. Запуск nfsen-ng
@@ -419,9 +471,9 @@ Restarting...
 [source,bash]
 ----
 cd ~/nfsen-ng
-# убедитесь, что в compose указан тег 1.0.0-RC.1 или edge, не latest
+# убедитесь, что в compose указан тег edge (рекомендуется) или 1.0.0-RC.1, не latest
 docker compose pull
-docker compose up -d
+docker compose up -d --force-recreate
 ----
 
 Проверка:
@@ -452,14 +504,44 @@ http://localhost:9000
 http://<IP_СЕРВЕРА>:9000
 ----
 
-. Перейдите на вкладку *Admin*.
+. Перейдите на вкладку *Admin* (или *Settings → Import* в новых сборках `edge`).
 . Нажмите *Initial Import* — импорт исторических nfcapd-файлов в RRD.
 . Дождитесь завершения (время зависит от объёма данных).
 
+Когда агенты уже шлют flow:
+
+. *Admin* → *Trigger Import* — подхватить свежие файлы.
+. Вкладка *Flows*: source `win-pc01`, интервал *1 hour*, timeline на время трафика → *Process data*.
+. В строке команды `nfdump -R` должны быть метки **`2240…2315`**, а не `1940…` (MSK, после фикса TZ).
+
 [TIP]
 ====
-На вкладке Admin также доступен *Health check*: версия nfdump, пути к данным, статус daemon.
+На вкладке Admin также доступен *Health check*: версия nfdump, пути к данным, статус daemon, *Capture freshness* по каждому источнику.
+
+Во время *Force Rescan* индикатор *nfcapd* может быть красным, *daemon* — зелёным; это нормально. Красный *nfcapd* для `ubuntu-pc01` без агента — тоже ожидаемо.
 ====
+
+[[переимпорт-rrd]]
+=== Переимпорт RRD после смены образа или TZ
+
+Если ранее использовали `1.0.0-RC.1` без `NFCAPD_TZ` или меняли часовой пояс:
+
+[source,bash]
+----
+cd ~/nfsen-ng
+docker compose up -d
+docker compose exec nfsen rm -rf /var/www/html/nfsen-ng/backend/datasources/data/*
+docker compose restart nfsen
+----
+
+Затем в UI: *Admin* → *Force Rescan* (дождаться *Rescan complete*) → *Trigger Import*.
+
+Проверка в терминале (эталон, не зависит от UI):
+
+[source,bash]
+----
+nfdump -R /var/nfdump/profiles-data/live/win-pc01/2026/07/03/nfcapd.202607032250:2026/07/03/nfcapd.202607032300 -c 10
+----
 
 == Шаг 7. Автозапуск nfcapd (systemd)
 
@@ -514,7 +596,7 @@ sudo systemctl status nfcapd-win-pc01.service nfcapd-ubuntu-pc01.service
 
 == Шаг 8. Настройка endpoint-агентов (netflowAgent)
 
-Perl-агент на каждом хосте отправляет IPFIX на коллектор. IP сервера — из шага 1 (`ip -4 addr`).
+Агент link:netflowAgent-design.adoc[netflowAgent] на каждом хосте отправляет NetFlow v9 на коллектор. IP сервера — из шага 1 (`ip -4 addr`).
 
 [cols="1,1,1,1", options="header"]
 |===
@@ -558,8 +640,14 @@ docker compose --profile proxy up -d
 |===
 | Симптом | Решение
 
-| Пустые графики
-| Нет файлов nfcapd → проверьте агенты, firewall, `find ... nfcapd.*`
+| Пустые графики, файлы nfcapd есть
+| См. <<tz-empty-ui,сдвиг часового пояса в UI>>; переимпорт RRD; образ `edge`
+
+| Нет файлов nfcapd на диске
+| Проверьте агенты, firewall, `find ... nfcapd.*`, `tcpdump -ni any udp port 9995`
+
+| Flows: «No data available», в терминале flows есть
+| Сдвиг −3 ч в `-R`; `edge` + `NFCAPD_TZ`; <<переимпорт-rrd,переимпорт RRD>>
 
 | Источник не виден в UI
 | `NFSEN_SOURCES` не совпадает с именем папки `live/<source>`
@@ -568,7 +656,7 @@ docker compose --profile proxy up -d
 | Раскомментируйте `ports: "9000:9000"`, проверьте `ufw`
 
 | `docker compose pull`: `latest: not found`
-| Замените `image: ...:latest` на `:1.0.0-RC.1` или `:edge`
+| Замените `image: ...:latest` на `:edge` (рекомендуется) или `:1.0.0-RC.1`
 
 | Контейнер `Restarting (127)`, `docker-entrypoint.sh: No such file`
 | Закомментируйте строку `entrypoint:` в compose (см. шаг 4.2)
@@ -576,13 +664,37 @@ docker compose --profile proxy up -d
 | `permission denied` при Docker
 | Выполните `sudo reboot` после `usermod -aG docker`; проверьте `groups`
 
-| Время на графиках сдвинуто
-| Выровняйте `TZ` и при необходимости `NFCAPD_TZ`
+| `service "nfsen" is not running` при `docker compose exec`
+| Сначала `docker compose up -d`; имя сервиса — `nfsen`, не `nfsen-ng`
 
 | SSE / графики не обновляются
 | Не сжимайте прокси-трафик к nfsen-ng; для Caddy см. wiki nfsen-ng
 
 |===
+
+[[tz-empty-ui]]
+=== Сдвиг часового пояса в UI (MSK, UTC+3)
+
+Типичные симптомы на `1.0.0-RC.1`:
+
+* timeline показывает 22:43, а в Flows команда `nfdump -R` содержит `...1940:...2015` (−3 ч);
+* LIVE / RRD со сдвигом (+3 ч или год 2024 вместо 2026);
+* ползунок timeline не уходит в будущее (упирается в «сейчас») — это нормально.
+
+*Решение* (проверено в проекте netflowAgent, июль 2026):
+
+. Образ `ghcr.io/mbolli/nfsen-ng:edge`
+. `TZ=UTC` и `NFCAPD_TZ=Europe/Moscow` в `environment`
+. `docker compose up -d --force-recreate`
+. <<переимпорт-rrd,Переимпорт RRD>> + *Force Rescan* + *Trigger Import*
+. Flows: в `-R` метки **`22xx`**, в таблице появляются flows (например 50 flows)
+
+Upstream: link:https://github.com/mbolli/nfsen-ng/issues/145[#145], link:https://github.com/mbolli/nfsen-ng/issues/103[#103], link:https://github.com/mbolli/nfsen-ng/issues/68[#68] (TZ браузера / клиента).
+
+[NOTE]
+====
+Имена файлов `nfcapd.*` округляются до *5 минут* (`22:43` → `2240` в `-R`). Это нормально.
+====
 
 === Полезные команды
 
@@ -591,13 +703,13 @@ docker compose --profile proxy up -d
 # Логи nfsen-ng
 docker compose -f ~/nfsen-ng/docker-compose.yml logs -f nfsen
 
-# Перезапуск
-cd ~/nfsen-ng && docker compose restart
+# Перезапуск (после смены environment — лучше --force-recreate)
+cd ~/nfsen-ng && docker compose up -d --force-recreate
 
-# Полный переимпорт RRD (осторожно — удалит текущие RRD)
-# В docker-compose.yml временно:
-#   - NFSEN_FORCE_IMPORT=true
-# затем docker compose up -d и уберите переменную после первого запуска
+# Сброс RRD и переимпорт (после смены TZ / образа на edge)
+docker compose exec nfsen rm -rf /var/www/html/nfsen-ng/backend/datasources/data/*
+docker compose restart nfsen
+# затем в UI: Force Rescan → Trigger Import
 
 # Статус nfcapd
 sudo systemctl status nfcapd
@@ -610,7 +722,8 @@ sudo systemctl status nfcapd
 * [ ] Два `nfcapd` слушают UDP 9995 и 9996 (`ss -ulnp`)
 * [ ] Каталоги `live/win-pc01/` и `live/ubuntu-pc01/` созданы
 * [ ] ufw: проверен статус; правила — только если `active`
-* [ ] В `docker-compose.yml`: `NFSEN_SOURCES=win-pc01,ubuntu-pc01`, порт `9000:9000`
+* [ ] В `docker-compose.yml`: `image: ...:edge`, `TZ=UTC`, `NFCAPD_TZ=Europe/Moscow`, `NFSEN_SOURCES=win-pc01,ubuntu-pc01`, порт `9000:9000`
+* [ ] `docker compose exec nfsen env` показывает `NFCAPD_TZ=Europe/Moscow`
 * [ ] `docker compose up -d` выполнен успешно
 * [ ] *(позже, когда будут агенты)* flow-файлы в каталогах, Initial Import в Admin
 * [ ] *(позже)* win-pc01 → :9995, ubuntu-pc01 → :9996
@@ -620,10 +733,12 @@ sudo systemctl status nfcapd
 * link:https://github.com/mbolli/nfsen-ng[nfsen-ng на GitHub]
 * link:https://github.com/mbolli/nfsen-ng/wiki/Installation[Wiki: Installation]
 * link:https://github.com/mbolli/nfsen-ng/wiki/Configuration[Wiki: Configuration]
+* link:https://github.com/mbolli/nfsen-ng/issues/145[nfsen-ng #145 — timezone MSK / NFCAPD_TZ]
+* link:https://github.com/mbolli/nfsen-ng/issues/103[nfsen-ng #103 — timezone UTC vs local]
 * link:https://github.com/phaag/nfdump[nfdump / nfcapd]
 
 [[тест-softflowd]]
-== Приложение: тест через softflowd (без Perl-агентов)
+== Приложение: тест через softflowd (без netflowAgent)
 
 Пока агенты netflowAgent не готовы, можно *локально* проверить цепочку «отправка → nfcapd → файлы на диске» на самой VM-коллекторе:
 
