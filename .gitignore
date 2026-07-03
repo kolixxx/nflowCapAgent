@@ -1,0 +1,9 @@
+# Rust
+agent/target/
+
+# Npcap SDK (download locally for Windows builds)
+agent/vendor/npcap-sdk/
+
+# Local test config / logs
+agent/config.toml
+**/agent.log

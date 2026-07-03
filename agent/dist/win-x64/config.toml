@@ -1,0 +1,27 @@
+# netflowAgent — example configuration (win-pc01)
+# Copy to config.toml and set collector.host to your Ubuntu collector IP.
+
+[collector]
+host = "192.168.30.36"
+port = 9995
+
+[export]
+format = "netflow9"
+observation_domain_id = 1
+source_id = 1
+
+[capture]
+# Windows Server 2019 test VM: Name from Get-NetAdapter → "Ethernet0"
+interface = "Ethernet0"
+promiscuous = false
+
+[flow]
+active_timeout_secs = 60
+inactive_timeout_secs = 15
+
+[logging]
+level = "info"
+# Windows:
+file = "C:\\ProgramData\\netflowAgent\\agent.log"
+# Linux:
+# file = "/var/log/netflowAgent/agent.log"
