@@ -221,6 +221,122 @@ netflowAgent_win-linux/
    nfsen-ng (графики, Flows, Statistics)
 ----
 
+[[agent-log]]
+== Лог netflowAgent (консоль)
+
+При запуске `netflowAgent.exe --config config.toml` агент пишет события в **stdout** (окно cmd/PowerShell). Уровень задаётся `logging.level` в config (по умолчанию `info`).
+
+=== Стартовые строки (один раз)
+
+[cols="1,2", options="header"]
+|===
+| Сообщение | Значение
+
+| `netflowAgent starting`
+| Старт; поля `target` (IP:port коллектора), `export=netflow9`, `interface`, `version`
+
+| `flow table ready`
+| Таблица flow готова; `active_timeout_secs` / `inactive_timeout_secs` из config
+
+| `opening capture device`
+| Npcap открыл интерфейс (`device`, `desc` — имя адаптера)
+
+| `NetFlow v9 exporter ready`
+| UDP-сокет готов; `dest` — коллектор, `source_port=2056`
+
+| `netflowAgent running — Ctrl+C to stop`
+| Основной цикл захвата и экспорта; остановка — Ctrl+C
+
+|===
+
+См. скриншот: <<запуск-агента,Запуск агента>>.
+
+=== `exporting expired flows` (каждую ~1 секунду при трафике)
+
+.Экспорт flow-записей на коллектор (нормальная работа)
+image::images/netflowAgent-exporting-flows-v0.1.1.png[exporting expired flows — flows и active в логе,align="center",width=700]
+
+Пример строки:
+
+[source,text]
+----
+2026-07-04T13:43:05.702298Z  INFO netflowAgent::agent: exporting expired flows  flows=2  active=35
+----
+
+[cols="1,2", options="header"]
+|===
+| Поле | Значение
+
+| `2026-07-04T13:43:05.702298Z`
+| Время события в **UTC** (суффикс `Z`). Для MSK: **+3 часа**
+
+| `INFO`
+| Информационное сообщение (не ошибка)
+
+| `exporting expired flows`
+| Агент отправил на коллектор пакет NetFlow v9 с **завершёнными** flow
+
+| `flows=2`
+| В этом UDP-пакете **2 flow-записи** (две «сессии», которые только что истекли)
+
+| `active=35`
+| Сейчас в таблице **35 активных** flow (ещё идёт трафик, не экспортированы)
+
+|===
+
+==== Что такое один flow
+
+Один **flow** — одно агрегированное соединение по **5-tuple**:
+
+* IP источника и назначения
+* порты (TCP/UDP)
+* протокол (6 = TCP, 17 = UDP)
+* счётчики байт и пакетов за время жизни
+
+Агент **не** логирует каждый пакет — только **сводки** по соединениям.
+
+==== Жизненный цикл flow
+
+[source,text]
+----
+  пакеты с NIC → flow table (observe)
+                      │
+         ┌────────────┴────────────┐
+         │  active (ещё трафик)    │
+         └────────────┬────────────┘
+                      │ нет пакетов inactive_timeout_secs (15 с)
+                      │ или дольше active_timeout_secs (60 с)
+                      ▼
+                 expired → NetFlow v9 → UDP :9995 → nfcapd
+----
+
+* **active** — соединение ещё «живое», пакеты приходят.
+* **expired** — тишина 15 с (или максимум 60 с) → flow закрывается в таблице и **экспортируется**.
+* Раз в **~1 с** агент проверяет таблицу; если есть expired — пишет `exporting expired flows` и шлёт UDP.
+
+[TIP]
+====
+*Много строк* `exporting expired flows` с `flows=10…50` — **нормально** при активном браузере, ping, RDP и т.д.
+*Нет строк* минутами — на интерфейсе мало трафика или агент не захватывает (Npcap, права admin).
+====
+
+=== Прочие сообщения
+
+[cols="1,2", options="header"]
+|===
+| Сообщение | Значение
+
+| `export failed`
+| **ERROR** — UDP на коллектор не ушёл (сеть, firewall); flow из этого цикла могли не дойти
+
+| `capture read error`
+| **WARN** — сбой чтения Npcap; часто временный
+
+| `config OK`
+| Режим `--check-config`: config.toml корректен
+
+|===
+
 == Конфигурация (`config.toml`)
 
 Пример для **win-pc01**:
@@ -379,6 +495,7 @@ cargo build --release
 * [ ] Windows VM: Npcap установлен (позже — через наш setup)
 * [ ] В `config.toml`: правильные `host` и `port`
 
+[[запуск-агента-checklist]]
 === Запуск агента
 
 Скопируйте на Windows VM папку `agent/dist/win-x64/` (или `netflowAgent.exe` + `config.toml`).
@@ -395,6 +512,7 @@ cd C:\netflowAgent
 .\netflowAgent.exe --config config.toml
 ----
 
+[[запуск-агента]]
 .Успешный запуск netflowAgent v0.1.1 (Windows Server 2019, `interface = "auto"`)
 image::images/netflowAgent-start-v0.1.1.png[Запуск netflowAgent v0.1.1 — читаемые логи, NetFlow v9 exporter ready, exporting flows,align="center",width=700]
 
@@ -404,7 +522,7 @@ image::images/netflowAgent-start-v0.1.1.png[Запуск netflowAgent v0.1.1 —
 * `opening capture device` — Intel 82574L (или ваш адаптер)
 * `NetFlow v9 exporter ready` → `192.168.30.36:9995`
 * `netflowAgent running — Ctrl+C to stop`
-* периодически: `exporting expired flows`
+* периодически: `exporting expired flows` — см. <<agent-log,Лог netflowAgent>>
 
 [NOTE]
 ====
