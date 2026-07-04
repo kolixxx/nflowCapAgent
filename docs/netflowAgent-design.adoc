@@ -3,7 +3,7 @@
 :toclevels: 3
 :sectnums:
 :author: netflowAgent
-:revdate: 2026-07-03
+:revdate: 2026-07-04
 
 == Роли
 
@@ -258,50 +258,117 @@ file = "C:\\ProgramData\\netflowAgent\\agent.log"   # Windows
 * [x] Структура Rust-проекта, парсинг config
 * [x] Сборка на Windows (release x64)
 
-=== Этап 1 — MVP «пульс» (готово к тесту)
+=== Этап 1 — MVP «пульс» ✅ принят (2026-07-04)
 
 * [x] Захват пакетов с интерфейса (Npcap)
 * [x] Flow table (IPv4 TCP/UDP)
 * [x] Экспорт NetFlow v9 на коллектор (UDP, source port 2056)
 * [x] CLI: `--check-config`, `--list-devices`
-* [ ] Логи в файл (пока только stdout; файл — этап 2)
 * [x] Запуск вручную от администратора
+* [x] Приёмка: файлы на коллекторе, Flows/Graphs в nfsen-ng (`edge` + TZ), auto-import за ночь
+
+[NOTE]
+====
+Логи в файл и Windows Service — <<этап-2,этап 2>>. В Flows колонки First/Last могут быть в UTC (−3 ч от MSK) — см. link:nfsen-ng-install-ubuntu2404.adoc#flows-table-utc[nfsen-ng doc].
+====
+
+**Критерий приёмки (выполнено):**
+
+[source,bash]
+----
+find /var/nfdump/profiles-data/live/win-pc01 -name "nfcapd.*" -ls
+# nfsen-ng → Graphs / Flows → win-pc01
+----
+
+=== Этап 1.5 — полировка v0.1.1 (следующий)
+
+* [ ] NetFlow v9: убрать `Event: INVALID` в nfdump (шаблон полей)
+* [ ] Логи в консоли Windows без ANSI-«крякозябр» (`set NO_COLOR=1` или `with_ansi(false)`)
+* [ ] `config.example.toml`: `interface = "auto"` по умолчанию
+* [ ] Сборка → `agent/dist/win-x64/` → push на GitHub
+
+*Тестер:* заменить exe на VM, прогнать 30 мин, убедиться что flows в nfdump без INVALID (или меньше).
+
+[[этап-2]]
+=== Этап 2 — сервис и установка
+
+* Windows Service (автозапуск, без окна cmd)
+* Логи в файл (`config.toml` → `logging.file`)
+* Установщик Windows (exe + Npcap, или проверка Npcap)
+* Linux: сборка агента, systemd unit
+* `.deb` или `install.sh` для Ubuntu endpoint → `:9996` / `ubuntu-pc01`
+
+*Тестер:* установка «как пользователь», reboot VM — агент поднялся сам; график `win-pc01` после reboot.
+
+=== Этап 3 — IPFIX и расширение
+
+* IPFIX export (параллельно или вместо v9)
+* IPv6 flows
+* Фильтры захвата в config
+* Перезагрузка config без переустановки (SIGHUP / API)
+
+== План работ (порядок)
+
+[cols="1,1,2,2", options="header"]
+|===
+| # | Кто | Задача | Результат
+
+| 1
+| AI
+| Этап 1.5: v0.1.1 (INVALID, логи, config)
+| Новый `netflowAgent.exe` на GitHub
+
+| 2
+| Вы
+| Тест v0.1.1 на Win Server 2019 (~30–60 мин)
+| OK / список замечаний
+
+| 3
+| AI
+| Этап 2: Windows Service + лог в файл
+| exe + инструкция «установка службы»
+
+| 4
+| Вы
+| Тест службы: reboot, автозапуск
+| Служба работает без cmd
+
+| 5
+| AI
+| Этап 2: установщик Windows (Npcap)
+| setup.exe или скрипт установки
+
+| 6
+| AI
+| Этап 2: Linux agent + systemd
+| бинарник + unit для ubuntu-pc01
+
+| 7
+| Вы
+| Второй endpoint: Ubuntu → `:9996`, график `ubuntu-pc01`
+| Два источника в nfsen-ng
+
+| 8
+| AI
+| Этап 3: IPFIX, IPv6 (по приоритету)
+| config `format = "ipfix"`
+
+|===
+
+[IMPORTANT]
+====
+Между этапами коллектор (*nfcapd* + *nfsen-ng*) *не трогаем* — уже настроен. Меняется только агент на endpoint-хостах.
+====
 
 **Сборка (разработчик, Windows):**
 
 [source,powershell]
 ----
 cd agent
-# Npcap SDK: https://npcap.com/#download → распаковать в agent/vendor/npcap-sdk/
-# (Lib/x64/wpcap.lib — путь уже в .cargo/config.toml)
 cargo build --release
 # exe: target/release/netflowAgent.exe
-# или готовый комплект: agent/dist/win-x64/
+# или: agent/dist/win-x64/
 ----
-
-**Критерий приёмки (ваш тест):**
-
-[source,bash]
-----
-# на коллекторе, через 5–10 мин после трафика с Windows VM
-find /var/nfdump/profiles-data/live/win-pc01 -name "nfcapd.*" -ls
-----
-
-Затем nfsen-ng → Admin → Initial Import → источник `win-pc01` на графиках.
-
-=== Этап 2 — сервис и установка
-
-* Windows Service (встроенный)
-* Linux systemd unit
-* Установщик Windows (exe + Npcap)
-* `.deb` или `install.sh` для Ubuntu
-
-=== Этап 3 — IPFIX и полировка
-
-* IPFIX export
-* IPv6
-* Фильтры в config
-* Перезагрузка config без переустановки
 
 == Чеклист тестера (Этап 1)
 
@@ -379,10 +446,16 @@ cd C:\netflowAgent
 | `Ethernet0` (Intel 82574L)
 
 | UDP 9995 → коллектор
-| проверим при первом запуске агента
+| ✅ работает
 
-| Готовый exe (этап 1)
-| `agent/dist/win-x64/netflowAgent.exe` (~1.8 MB)
+| nfsen-ng Graphs / auto-import
+| ✅ проверено (ночной прогон)
+
+| Этап 1
+| ✅ принят 2026-07-04
+
+| Следующий шаг
+| v0.1.1 → этап 2 (Service)
 
 | Rust на Windows VM
 | не нужен — раздаём собранный `netflowAgent.exe`
@@ -394,8 +467,9 @@ cd C:\netflowAgent
 * [x] Windows Server 2019 x64 в сети с коллектором
 * [x] `ping 192.168.30.36` — OK
 * [x] Интерфейс: `Ethernet0` (`Get-NetAdapter`)
-* [ ] Npcap установлен (позже — наш setup)
-* [ ] Первый запуск `netflowAgent.exe` от администратора
+* [x] Npcap установлен
+* [x] Первый запуск `netflowAgent.exe` от администратора
+* [x] Графики win-pc01 обновляются автоматически
 
 == Ссылки
 

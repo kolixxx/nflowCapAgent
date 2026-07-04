@@ -696,7 +696,68 @@ Upstream: link:https://github.com/mbolli/nfsen-ng/issues/145[#145], link:https:/
 Имена файлов `nfcapd.*` округляются до *5 минут* (`22:43` → `2240` в `-R`). Это нормально.
 ====
 
-=== Полезные команды
+[[flows-table-utc]]
+==== Время в таблице Flows (−3 ч от MSK)
+
+После настройки `edge` + `NFCAPD_TZ=Europe/Moscow` *timeline* и строка `nfdump -R` в Flows *совпадают* с выбранным интервалом (например выбрали 14:55–16:00 → в `-R` `...1455:...1600`).
+
+Колонки *First*, *Last*, *Received* в таблице при этом могут показывать время на **3 часа раньше** (UTC), чем ожидается в MSK:
+
+[cols="1,1,1", options="header"]
+|===
+| Где | Пример | Пояснение
+
+| Timeline / `-R`
+| `14:55 – 16:00`
+| Имена файлов nfcapd (MSK) — *верно*
+
+| First / Last в таблице
+| `11:54`
+| UTC; **+3 ч = 14:54 MSK** — тот же flow
+
+| Graphs
+| ось времени
+| Обычно совпадает с ожиданиями; ориентир для анализа
+
+|===
+
+Это *косметика UI* nfsen-ng / nfdump, не ошибка агента и не потеря данных. Для точного времени в терминале: `nfdump -R ... -c 10` (там тоже UTC — прибавьте +3 ч для MSK).
+
+Проверено: link:https://github.com/kolixxx/nflowCapAgent[nflowCapAgent], июль 2026 — графики обновляются автоматически, flows находятся.
+
+[[auto-import]]
+=== Автоимпорт: нужен ли Trigger Import каждый раз?
+
+*Нет.* В штатном режиме ручной импорт не нужен.
+
+[source,text]
+----
+netflowAgent → nfcapd (файлы каждые ~5 мин)
+                    ↓
+         import daemon nfsen-ng (Watching N dirs)
+                    ↓
+              RRD → Graphs / Statistics
+----
+
+* *Import daemon* (Admin: *Watching 2 dirs*, *Last auto import: N min ago*) подхватывает новые `nfcapd.*` и обновляет RRD примерно каждые **5 минут**.
+
+[cols="1,2", options="header"]
+|===
+| Действие | Когда
+
+| Ничего не нажимать
+| Агент работает, Graphs догоняют сами (задержка ~5 мин)
+
+| *Trigger Import*
+| Нужны данные «прямо сейчас», не хотите ждать auto-import
+
+| *Force Rescan*
+| Смена TZ/образа, сброс RRD, новый источник, «всё сломалось» — *не* на каждый новый flow
+
+|===
+
+Если Graphs не растут 15+ мин при работающем агенте: Admin → *Capture freshness* для `win-pc01`; один раз *Trigger Import*; проверить, что агент на Windows не остановлен.
+
 
 [source,bash]
 ----
