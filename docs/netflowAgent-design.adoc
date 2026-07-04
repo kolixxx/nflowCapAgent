@@ -385,9 +385,9 @@ cargo build --release
 
 . Установите **Npcap** (https://npcap.com/) — галочка «Install Npcap in WinPcap API-compatible Mode».
 . Отредактируйте `config.toml`: `collector.host`, `capture.interface` (см. ниже).
-. **От имени администратора** в PowerShell:
+. **От имени администратора** в cmd или PowerShell:
 
-[source,powershell]
+[source,cmd]
 ----
 cd C:\netflowAgent
 .\netflowAgent.exe --list-devices
@@ -395,10 +395,24 @@ cd C:\netflowAgent
 .\netflowAgent.exe --config config.toml
 ----
 
-Имя интерфейса на Windows часто **не** `Ethernet0`, а `\Device\NPF_{GUID}`. Если в `config.toml` указано `Ethernet0`, агент ищет совпадение по имени или описанию; при ошибке открытия — возьмите имя из `--list-devices`.
+.Успешный запуск netflowAgent v0.1.1 (Windows Server 2019, `interface = "auto"`)
+image::images/netflowAgent-start-v0.1.1.png[Запуск netflowAgent v0.1.1 — читаемые логи, NetFlow v9 exporter ready, exporting flows,align="center",width=700]
+
+В консоли должны быть строки:
+
+* `version=0.1.1`, `interface=auto`
+* `opening capture device` — Intel 82574L (или ваш адаптер)
+* `NetFlow v9 exporter ready` → `192.168.30.36:9995`
+* `netflowAgent running — Ctrl+C to stop`
+* периодически: `exporting expired flows`
+
+[NOTE]
+====
+С `interface = "auto"` имя `\Device\NPF_{GUID}` подставляется автоматически. Если нужен конкретный адаптер — укажите его из `--list-devices`.
+====
 
 * [ ] `netflowAgent.exe --config config.toml` от администратора
-* [ ] В консоли: `NetFlow v9 exporter ready`, `netflowAgent running`
+* [ ] В консоли: как на скриншоте выше
 * [ ] С Windows VM: открыть сайты, ping, несколько минут трафика
 
 === Проверка на коллекторе
@@ -455,7 +469,10 @@ cd C:\netflowAgent
 | ✅ принят 2026-07-04
 
 | Следующий шаг
-| v0.1.1 → этап 2 (Service)
+| Тест v0.1.1 → этап 2 (Service)
+
+| Агент (текущий)
+| v0.1.1 — `agent/dist/win-x64/netflowAgent.exe`
 
 | Rust на Windows VM
 | не нужен — раздаём собранный `netflowAgent.exe`
