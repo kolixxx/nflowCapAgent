@@ -68,5 +68,12 @@ fn list_devices() -> anyhow::Result<()> {
 fn init_logging(level: &str) {
     let filter = tracing_subscriber::EnvFilter::try_new(level)
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+
+    // Windows cmd.exe does not render ANSI colors; plain text is readable.
+    let use_ansi = !cfg!(windows) && std::env::var_os("NO_COLOR").is_none();
+
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_ansi(use_ansi)
+        .init();
 }

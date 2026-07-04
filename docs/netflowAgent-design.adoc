@@ -280,14 +280,14 @@ find /var/nfdump/profiles-data/live/win-pc01 -name "nfcapd.*" -ls
 # nfsen-ng → Graphs / Flows → win-pc01
 ----
 
-=== Этап 1.5 — полировка v0.1.1 (следующий)
+=== Этап 1.5 — полировка v0.1.1 ✅
 
-* [ ] NetFlow v9: убрать `Event: INVALID` в nfdump (шаблон полей)
-* [ ] Логи в консоли Windows без ANSI-«крякозябр» (`set NO_COLOR=1` или `with_ansi(false)`)
-* [ ] `config.example.toml`: `interface = "auto"` по умолчанию
-* [ ] Сборка → `agent/dist/win-x64/` → push на GitHub
+* [x] NetFlow v9: 4-byte counters + INPUT/OUTPUT SNMP (template 257, меньше INVALID)
+* [x] Логи в консоли Windows без ANSI (`with_ansi(false)` на Windows)
+* [x] `config.example.toml`: `interface = "auto"` по умолчанию
+* [x] Сборка → `agent/dist/win-x64/` → GitHub
 
-*Тестер:* заменить exe на VM, прогнать 30 мин, убедиться что flows в nfdump без INVALID (или меньше).
+*Тестер:* заменить exe на VM, прогнать 30 мин; в `nfdump -c 10` проверить, что `Event: INVALID` нет или реже.
 
 [[этап-2]]
 === Этап 2 — сервис и установка
@@ -313,17 +313,17 @@ find /var/nfdump/profiles-data/live/win-pc01 -name "nfcapd.*" -ls
 |===
 | # | Кто | Задача | Результат
 
-| 1
+| **1**
 | AI
-| Этап 1.5: v0.1.1 (INVALID, логи, config)
-| Новый `netflowAgent.exe` на GitHub
+| ~~Этап 1.5: v0.1.1~~ ✅
+| `netflowAgent.exe` v0.1.1 на GitHub
 
-| 2
+| **2**
 | Вы
 | Тест v0.1.1 на Win Server 2019 (~30–60 мин)
 | OK / список замечаний
 
-| 3
+| **3**
 | AI
 | Этап 2: Windows Service + лог в файл
 | exe + инструкция «установка службы»

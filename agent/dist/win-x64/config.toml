@@ -11,8 +11,8 @@ observation_domain_id = 1
 source_id = 1
 
 [capture]
-# Windows Server 2019 test VM: Name from Get-NetAdapter → "Ethernet0"
-interface = "Ethernet0"
+# "auto" = first non-loopback interface (recommended on Windows)
+interface = "auto"
 promiscuous = false
 
 [flow]

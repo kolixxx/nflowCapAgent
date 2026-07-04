@@ -8,22 +8,27 @@ use tracing::{debug, info};
 
 /// RFC 3954 recommends a stable exporter source port; many collectors expect it.
 const EXPORT_SOURCE_PORT: u16 = 2056;
-const TEMPLATE_ID: u16 = 256;
+/// Bumped in 0.1.1 so collectors refresh template after field layout change.
+const TEMPLATE_ID: u16 = 257;
 
-/// Standard field types used in our template (PEN 0).
+/// nfdump-compatible template: 4-byte counters + interface indices (avoids INVALID).
 const TEMPLATE_FIELDS: &[(u16, u16)] = &[
-    (1, 8),   // IN_BYTES
-    (2, 8),   // IN_PKTS
+    (1, 4),   // IN_BYTES
+    (2, 4),   // IN_PKTS
     (4, 1),   // PROTOCOL
     (7, 2),   // L4_SRC_PORT
     (11, 2),  // L4_DST_PORT
     (8, 4),   // IPV4_SRC_ADDR
     (12, 4),  // IPV4_DST_ADDR
+    (10, 4),  // INPUT_SNMP
+    (14, 4),  // OUTPUT_SNMP
     (22, 4),  // FIRST_SWITCHED
     (21, 4),  // LAST_SWITCHED
 ];
 
-const RECORD_LEN: u16 = 37; // sum of TEMPLATE_FIELDS lengths
+const RECORD_LEN: u16 = 37;
+const INPUT_SNMP_INDEX: u32 = 1;
+const OUTPUT_SNMP_INDEX: u32 = 0;
 
 pub struct NetflowV9Exporter {
     socket: UdpSocket,
@@ -77,10 +82,16 @@ impl NetflowV9Exporter {
             self.boot_instant,
         )?);
 
+        let domain_id = if self.export_cfg.observation_domain_id != 0 {
+            self.export_cfg.observation_domain_id
+        } else {
+            self.export_cfg.source_id
+        };
+
         let packet = build_v9_packet(
             &flowsets,
             self.sequence,
-            self.export_cfg.source_id,
+            domain_id,
             self.boot_instant,
         )?;
         self.sequence = self.sequence.wrapping_add(1);
@@ -111,13 +122,17 @@ fn unix_secs() -> u32 {
         .as_secs() as u32
 }
 
+fn to_u32_counter(value: u64) -> u32 {
+    value.min(u32::MAX as u64) as u32
+}
+
 fn build_template_flowset(template_id: u16) -> Vec<u8> {
     let field_count = TEMPLATE_FIELDS.len() as u16;
     let body_len = 4 + (field_count as usize * 4);
     let total_len = 4 + body_len;
 
     let mut buf = Vec::with_capacity(total_len);
-    buf.write_u16::<BigEndian>(0).unwrap(); // FlowSet ID 0 = template
+    buf.write_u16::<BigEndian>(0).unwrap();
     buf.write_u16::<BigEndian>(total_len as u16).unwrap();
     buf.write_u16::<BigEndian>(template_id).unwrap();
     buf.write_u16::<BigEndian>(field_count).unwrap();
@@ -140,13 +155,15 @@ fn build_data_flowset(
     buf.write_u16::<BigEndian>(total_len as u16).unwrap();
 
     for flow in flows {
-        buf.write_u64::<BigEndian>(flow.bytes).unwrap();
-        buf.write_u64::<BigEndian>(flow.packets).unwrap();
+        buf.write_u32::<BigEndian>(to_u32_counter(flow.bytes)).unwrap();
+        buf.write_u32::<BigEndian>(to_u32_counter(flow.packets)).unwrap();
         buf.write_u8(flow.key.protocol).unwrap();
         buf.write_u16::<BigEndian>(flow.key.src_port).unwrap();
         buf.write_u16::<BigEndian>(flow.key.dst_port).unwrap();
         write_ipv4(&mut buf, flow.key.src_ip);
         write_ipv4(&mut buf, flow.key.dst_ip);
+        buf.write_u32::<BigEndian>(INPUT_SNMP_INDEX).unwrap();
+        buf.write_u32::<BigEndian>(OUTPUT_SNMP_INDEX).unwrap();
         buf.write_u32::<BigEndian>(uptime_ms(boot, flow.first_seen))
             .unwrap();
         buf.write_u32::<BigEndian>(uptime_ms(boot, flow.last_seen))
@@ -174,8 +191,8 @@ fn build_v9_packet(
     }
 
     let mut packet = Vec::with_capacity(20 + body.len());
-    packet.write_u16::<BigEndian>(9).unwrap(); // version
-    packet.write_u16::<BigEndian>(flowsets.len() as u16).unwrap(); // count = flow sets
+    packet.write_u16::<BigEndian>(9).unwrap();
+    packet.write_u16::<BigEndian>(flowsets.len() as u16).unwrap();
     packet
         .write_u32::<BigEndian>(uptime_ms(boot, Instant::now()))
         .unwrap();
@@ -198,6 +215,7 @@ mod tests {
         let fs = build_template_flowset(TEMPLATE_ID);
         assert_eq!(fs.len(), 4 + 4 + TEMPLATE_FIELDS.len() * 4);
         assert_eq!(RECORD_LEN, 37);
+        assert_eq!(TEMPLATE_FIELDS.len(), 11);
     }
 
     #[test]
