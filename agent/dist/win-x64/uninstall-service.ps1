@@ -1,16 +1,17 @@
 # Remove netflowAgent Windows service (run as Administrator)
 param(
-    [string]$InstallDir = "C:\netflowAgent"
+    [string]$ServiceName = "netflowAgent"
 )
 
 $ErrorActionPreference = "Stop"
-$exe = Join-Path $InstallDir "netflowAgent.exe"
 
-if (Test-Path $exe) {
-    & $exe --uninstall-service
+$existing = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+if ($existing) {
+    Write-Host "Stopping $ServiceName..."
+    Stop-Service $ServiceName -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+    & sc.exe delete $ServiceName
+    Write-Host "Service $ServiceName removed."
 } else {
-    Stop-Service netflowAgent -Force -ErrorAction SilentlyContinue
-    & sc.exe delete netflowAgent
+    Write-Host "Service $ServiceName not found."
 }
-
-Write-Host "Done."

@@ -41,9 +41,9 @@
 | тег `v0.1.1`
 
 | **v0.2.0-test**
-| **тестовая** (исправление `sc.exe` binPath — см. `v0.2.0-test.1`)
+| **тестовая** (установка через `New-Service` — `v0.2.0-test.2`)
 | + Windows Service, лог в файл (`agent.log`)
-| тег `v0.2.0-test.1`, ветка `main`
+| тег `v0.2.0-test.2`, ветка `main`
 
 |===
 
@@ -480,14 +480,19 @@ find /var/nfdump/profiles-data/live/win-pc01 -name "nfcapd.*" -ls
 
 . Скопировать `netflowAgent.exe` **v0.2.0-test** и `config.toml` в `C:\netflowAgent\`
 . В `config.toml` задать `[logging] file = "C:\\ProgramData\\netflowAgent\\agent.log"`
-. PowerShell **от администратора**:
+. PowerShell **от администратора** — скрипт `install-service.ps1` (через `New-Service`, не `sc.exe`):
 
 [source,powershell]
 ----
 cd C:\netflowAgent
 .\netflowAgent.exe --check-config --config config.toml
-.\scripts\install-service.ps1
-# или вручную:
+.\install-service.ps1
+----
+
+Альтернатива без скрипта:
+
+[source,powershell]
+----
 .\netflowAgent.exe --install-service --config config.toml
 sc start netflowAgent
 ----

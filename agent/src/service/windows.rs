@@ -97,38 +97,43 @@ pub fn run_dispatcher() -> Result<()> {
 
 pub fn install_service(config_path: &str) -> Result<()> {
     let exe = std::env::current_exe().context("resolving executable path")?;
-    // sc.exe: exe path + arguments must be one quoted binPath value (space after '=').
-    let bin_inner = format!(
-        "\\\"{}\\\" --run-as-service --config \\\"{}\\\"",
-        exe.display(),
-        config_path,
+    let ps_script = format!(
+        r#"
+$ErrorActionPreference = 'Stop'
+$name = '{name}'
+$exe = '{exe}'
+$cfg = '{cfg}'
+$existing = Get-Service -Name $name -ErrorAction SilentlyContinue
+if ($existing) {{
+    Stop-Service $name -Force -ErrorAction SilentlyContinue
+    sc.exe delete $name | Out-Null
+    Start-Sleep -Seconds 2
+}}
+$bin = "`"$exe`" --run-as-service --config `"$cfg`""
+New-Service -Name $name -BinaryPathName $bin -DisplayName 'netflowAgent NetFlow Export' -StartupType Automatic -Description 'Exports host network flows as NetFlow v9 to nfcapd collector'
+"#,
+        name = SERVICE_NAME,
+        exe = exe.display().to_string().replace('\'', "''"),
+        cfg = config_path.replace('\'', "''"),
     );
-    let bin_path_arg = format!("binPath= \"{bin_inner}\"");
 
-    let output = Command::new("sc.exe")
+    let output = Command::new("powershell.exe")
         .args([
-            "create",
-            SERVICE_NAME,
-            &bin_path_arg,
-            "start= auto",
-            "DisplayName= \"netflowAgent NetFlow Export\"",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &ps_script,
         ])
         .output()
-        .context("running sc.exe create")?;
+        .context("running PowerShell New-Service")?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
-        bail!("sc.exe create failed: {stdout}{stderr}");
+        bail!("service install failed: {stdout}{stderr}");
     }
-
-    let _ = Command::new("sc.exe")
-        .args([
-            "description",
-            SERVICE_NAME,
-            "Exports host network flows as NetFlow v9 to nfcapd collector",
-        ])
-        .output();
 
     println!(
         "Service '{SERVICE_NAME}' installed. Start: sc start {SERVICE_NAME}",
@@ -137,19 +142,36 @@ pub fn install_service(config_path: &str) -> Result<()> {
 }
 
 pub fn uninstall_service() -> Result<()> {
-    let _ = Command::new("sc.exe")
-        .args(["stop", SERVICE_NAME])
-        .output();
+    let ps_script = format!(
+        r#"
+$ErrorActionPreference = 'SilentlyContinue'
+$name = '{name}'
+$svc = Get-Service -Name $name -ErrorAction SilentlyContinue
+if ($svc) {{
+    Stop-Service $name -Force
+    Start-Sleep -Seconds 2
+    sc.exe delete $name
+}}
+"#,
+        name = SERVICE_NAME,
+    );
 
-    let output = Command::new("sc.exe")
-        .args(["delete", SERVICE_NAME])
+    let output = Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &ps_script,
+        ])
         .output()
-        .context("running sc.exe delete")?;
+        .context("running PowerShell service removal")?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
-        bail!("sc.exe delete failed: {stdout}{stderr}");
+        bail!("service uninstall failed: {stdout}{stderr}");
     }
 
     println!("Service '{SERVICE_NAME}' uninstalled.");
