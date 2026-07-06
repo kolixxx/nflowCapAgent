@@ -598,6 +598,9 @@ sudo systemctl status nfcapd-win-pc01.service nfcapd-ubuntu-pc01.service
 
 Агент link:netflowAgent-design.adoc[netflowAgent] на каждом хосте отправляет NetFlow v9 на коллектор. IP сервера — из шага 1 (`ip -4 addr`).
 
+* link:netflowAgent-install-windows.adoc[Установка на Windows (win-pc01)] — **Npcap** + агент + служба
+* link:netflowAgent-install-linux.adoc[Установка на Linux (ubuntu-pc01)] — **libpcap** + агент (в разработке)
+
 [cols="1,1,1,1", options="header"]
 |===
 | Хост | IP коллектора | UDP-порт | Каталог на коллекторе
@@ -797,6 +800,8 @@ sudo systemctl status nfcapd
 == Ссылки
 
 * link:logs-cheatsheet.adoc[Памятка: логи и диагностика]
+* link:netflowAgent-install-windows.adoc[Установка агента — Windows]
+* link:netflowAgent-install-linux.adoc[Установка агента — Linux]
 * link:netflowAgent-design.adoc[netflowAgent — проект и план]
 * link:https://github.com/mbolli/nfsen-ng[nfsen-ng на GitHub]
 * link:https://github.com/mbolli/nfsen-ng/wiki/Installation[Wiki: Installation]

@@ -1,0 +1,228 @@
+= Установка netflowAgent на Windows (win-pc01)
+:toc: left
+:toclevels: 2
+:sectnums:
+:revdate: 2026-07-06
+
+Агент на **конечном Windows-хосте**: захват трафика → NetFlow v9 → коллектор `nfcapd`.
+
+См. также: link:netflowAgent-design.adoc[проект и план], link:logs-cheatsheet.adoc[логи и диагностика], link:nfsen-ng-install-ubuntu2404.adoc[коллектор nfsen-ng].
+
+== Схема
+
+[source,text]
+----
+Windows (win-pc01)                    Ubuntu-коллектор
+  Npcap + netflowAgent  ──UDP :9995──►  nfcapd → live/win-pc01/
+                                              └── nfsen-ng :9000
+----
+
+На Windows *не* ставятся: nfcapd, nfdump, nfsen-ng, Docker.
+
+== Требования
+
+[cols="1,2", options="header"]
+|===
+| Параметр | Значение
+
+| ОС
+| Windows 10 x64 **или** Windows Server 2016 / 2019 / 2022 x64
+
+| Права
+| Локальный **администратор** (Npcap, служба, захват пакетов)
+
+| Сеть
+| UDP до коллектора (по умолчанию `192.168.30.36:9995`)
+
+| Доп. ПО
+| **Npcap** (обязательно)
+
+| Не нужно
+| Rust, Wireshark, Perl, nfcapd
+
+|===
+
+Один `netflowAgent.exe` для Win10 и Windows Server — отдельной «серверной» сборки нет.
+
+== Шаг 1. Установка Npcap
+
+Npcap — драйвер захвата пакетов. Без него агент не откроет сетевой интерфейс.
+
+. Скачайте установщик: link:https://npcap.com/#download[Npcap — Download]
+. Запустите **от имени администратора**
+. В мастере установки:
++
+--
+* ✅ **Install Npcap in WinPcap API-compatible Mode** — обязательно
+* Остальное — по умолчанию (для лаборатории подойдёт)
+--
+. Завершите установку; при запросе **перезагрузите** VM (рекомендуется)
+
+=== Проверка Npcap
+
+После копирования агента (шаг 2):
+
+[source,powershell]
+----
+cd C:\netflowAgent
+.\netflowAgent.exe --list-devices
+----
+
+Должен появиться список адаптеров, например:
+
+[source,text]
+----
+\Device\NPF_{D546F1DA-...} | Intel(R) 82574L Gigabit Network Connection
+----
+
+Пустой список → Npcap не установлен или нужен reboot.
+
+== Шаг 2. Копирование агента
+
+Скачайте с GitHub (см. link:netflowAgent-design.adoc#versions[версии в design-доке]):
+
+* `netflowAgent.exe`
+* `config.toml`
+* `install-service.ps1`, `uninstall-service.ps1` (для службы, v0.2.0-test+)
+
+Каталог на хосте (пример):
+
+[source,text]
+----
+C:\netflowAgent\
+  netflowAgent.exe
+  config.toml
+  install-service.ps1
+  uninstall-service.ps1
+----
+
+== Шаг 3. Настройка config.toml
+
+Пример для **win-pc01**:
+
+[source,toml]
+----
+[collector]
+host = "192.168.30.36"   # IP Ubuntu-коллектора
+port = 9995              # порт nfcapd для win-pc01
+
+[export]
+format = "netflow9"
+observation_domain_id = 1
+source_id = 1
+
+[capture]
+interface = "auto"       # первый не-loopback адаптер (рекомендуется)
+promiscuous = false
+
+[flow]
+active_timeout_secs = 60
+inactive_timeout_secs = 15
+
+[logging]
+level = "info"
+file = "C:\\ProgramData\\netflowAgent\\agent.log"
+----
+
+[IMPORTANT]
+====
+`collector.port` *должен совпадать* с портом `nfcapd` для `win-pc01` на коллекторе (9995). Иначе flows попадут не в тот источник или потеряются.
+====
+
+Проверка config:
+
+[source,powershell]
+----
+.\netflowAgent.exe --check-config --config config.toml
+----
+
+Ожидается: `config OK`.
+
+== Шаг 4. Запуск
+
+=== Вариант А — служба Windows (рекомендуется, v0.2.0-test.2+)
+
+PowerShell **от администратора**:
+
+[source,powershell]
+----
+cd C:\netflowAgent
+.\install-service.ps1
+Get-Service netflowAgent
+Get-Content C:\ProgramData\netflowAgent\agent.log -Tail 15
+----
+
+Служба: автозапуск после reboot, без окна cmd.
+
+Удаление службы:
+
+[source,powershell]
+----
+.\uninstall-service.ps1
+----
+
+=== Вариант Б — ручной запуск (отладка, v0.1.1)
+
+[source,powershell]
+----
+cd C:\netflowAgent
+.\netflowAgent.exe --config config.toml
+----
+
+Остановка: Ctrl+C. После закрытия окна агент не работает.
+
+== Шаг 5. Проверка
+
+=== На Windows
+
+В логе (`agent.log` или консоль) — строки:
+
+* `NetFlow v9 exporter ready` → `dest=192.168.30.36:9995`
+* `exporting expired flows` (периодически при трафике)
+
+Сгенерируйте трафик: браузер, ping, RDP.
+
+=== На коллекторе (Ubuntu)
+
+[source,bash]
+----
+find /var/nfdump/profiles-data/live/win-pc01 -name "nfcapd.*" | tail -3
+nfdump -R /var/nfdump/profiles-data/live/win-pc01 -c 5 -o extended
+----
+
+=== В nfsen-ng
+
+Graphs → source `win-pc01` → Traffic или Flows. Задержка RRD ~5 мин; см. link:nfsen-ng-install-ubuntu2404.adoc#auto-import[автоимпорт].
+
+== Устранение неполадок
+
+[cols="1,2", options="header"]
+|===
+| Симптом | Действие
+
+| `--list-devices` пусто
+| Переустановить Npcap, reboot, права admin
+
+| `opening capture device` нет в логе
+| Npcap, `interface` в config, `--list-devices`
+
+| `export failed`
+| `ping` коллектора, firewall Windows, порт 9995
+
+| Служба не стартует
+| `agent.log`, `Get-Service netflowAgent`, см. link:logs-cheatsheet.adoc[памятку по логам]
+
+|===
+
+== Версии
+
+|===
+| Версия | Статус | Примечание
+
+| v0.1.1
+| откат
+| Только ручной запуск из cmd
+
+|===
+
+См. link:netflowAgent-design.adoc#versions[таблица версий в design-доке].

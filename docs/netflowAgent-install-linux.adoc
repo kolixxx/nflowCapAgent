@@ -1,0 +1,218 @@
+= Установка netflowAgent на Linux (ubuntu-pc01)
+:toc: left
+:toclevels: 2
+:sectnums:
+:revdate: 2026-07-06
+
+Агент на **конечном Linux-хосте** (Ubuntu endpoint): захват трафика → NetFlow v9 → коллектор `nfcapd`.
+
+См. также: link:netflowAgent-install-windows.adoc[установка на Windows], link:netflowAgent-design.adoc[проект], link:logs-cheatsheet.adoc[логи и диагностика].
+
+[NOTE]
+====
+*Статус:* бинарник и systemd unit для Linux — в плане (этап 2b). Документ фиксирует требования и config заранее; после сборки агента шаги запуска будут дополнены.
+====
+
+== Схема
+
+[source,text]
+----
+Ubuntu endpoint (ubuntu-pc01)           Ubuntu-коллектор (другая VM или тот же хост)
+  libpcap + netflowAgent  ──UDP :9996──►  nfcapd → live/ubuntu-pc01/
+                                                 └── nfsen-ng :9000
+----
+
+На endpoint *не* ставятся: nfcapd, nfsen-ng, Docker (если это не коллектор).
+
+[IMPORTANT]
+====
+Если агент и коллектор на **одной** машине — endpoint шлёт на `127.0.0.1:9996` или LAN-IP; порт **9996** (не 9995 — тот занят `win-pc01`).
+====
+
+== Требования
+
+[cols="1,2", options="header"]
+|===
+| Параметр | Значение
+
+| ОС
+| Ubuntu 22.04 / 24.04 x64 (или другой дистрибутив с libpcap)
+
+| Права
+| `root` для установки пакетов; служба может работать от отдельного пользователя (позже)
+
+| Сеть
+| UDP до коллектора (по умолчанию `:9996`)
+
+| Захват пакетов
+| **libpcap** + права на интерфейс (`CAP_NET_RAW` или root)
+
+| Не нужно
+| nfcapd, nfdump, nfsen-ng на endpoint
+
+|===
+
+== Шаг 1. Установка libpcap
+
+Аналог Npcap на Windows — библиотека для захвата пакетов.
+
+[source,bash]
+----
+sudo apt update
+sudo apt install -y libpcap0.8
+# для сборки из исходников (разработчик):
+# sudo apt install -y libpcap-dev
+----
+
+Проверка:
+
+[source,bash]
+----
+ldconfig -p | grep libpcap
+# или после установки бинарника:
+# netflowAgent --list-devices
+----
+
+== Шаг 2. Копирование агента
+
+*Пока не опубликовано.* После этапа 2b:
+
+[source,bash]
+----
+# пример целевой структуры
+sudo mkdir -p /opt/netflowAgent /etc/netflowAgent /var/log/netflowAgent
+sudo cp netflowAgent /opt/netflowAgent/
+sudo cp config.toml /etc/netflowAgent/
+----
+
+Бинарник — тот же код, что на Windows; отдельная сборка `cargo build --release` на Linux.
+
+== Шаг 3. Настройка config.toml
+
+Пример для **ubuntu-pc01**:
+
+[source,toml]
+----
+[collector]
+host = "192.168.30.36"   # IP коллектора
+port = 9996              # порт nfcapd для ubuntu-pc01 (не 9995!)
+
+[export]
+format = "netflow9"
+observation_domain_id = 1
+source_id = 2            # можно отличать от win-pc01
+
+[capture]
+interface = "eth0"         # или "auto", если поддерживается
+promiscuous = false
+
+[flow]
+active_timeout_secs = 60
+inactive_timeout_secs = 15
+
+[logging]
+level = "info"
+file = "/var/log/netflowAgent/agent.log"
+----
+
+[IMPORTANT]
+====
+`collector.port` = **9996** для `ubuntu-pc01`. Порт **9995** — только для Windows `win-pc01`.
+====
+
+== Шаг 4. Запуск (план)
+
+=== systemd (целевой вариант)
+
+*Пока не реализовано.* Ожидаемый unit `/etc/systemd/system/netflowAgent.service`:
+
+[source,ini]
+----
+[Unit]
+Description=netflowAgent NetFlow export
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/netflowAgent/netflowAgent --config /etc/netflowAgent/config.toml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+----
+
+[source,bash]
+----
+sudo systemctl daemon-reload
+sudo systemctl enable --now netflowAgent
+sudo journalctl -u netflowAgent -f
+----
+
+=== Ручной запуск (отладка)
+
+[source,bash]
+----
+sudo /opt/netflowAgent/netflowAgent --config /etc/netflowAgent/config.toml
+----
+
+Захват интерфейса на Linux часто требует **root** или capability `cap_net_raw`.
+
+== Шаг 5. Проверка
+
+=== На endpoint
+
+[source,bash]
+----
+tail -f /var/log/netflowAgent/agent.log
+# ожидается: exporting expired flows
+----
+
+=== На коллекторе
+
+[source,bash]
+----
+find /var/nfdump/profiles-data/live/ubuntu-pc01 -name "nfcapd.*" | tail -3
+nfdump -R /var/nfdump/profiles-data/live/ubuntu-pc01 -c 5 -o extended
+----
+
+=== В nfsen-ng
+
+Graphs → source `ubuntu-pc01`. Красный индикатор nfcapd для пустого источника до появления flows — нормально.
+
+== Сравнение Windows и Linux endpoint
+
+[cols="1,1,1", options="header"]
+|===
+| | Windows (win-pc01) | Linux (ubuntu-pc01)
+
+| Захват
+| **Npcap**
+| **libpcap**
+
+| UDP-порт
+| **9995**
+| **9996**
+
+| Папка на коллекторе
+| `live/win-pc01/`
+| `live/ubuntu-pc01/`
+
+| Автозапуск
+| Служба Windows + `install-service.ps1`
+| systemd (план)
+
+| Лог
+| `C:\ProgramData\netflowAgent\agent.log`
+| `/var/log/netflowAgent/agent.log`
+
+| Документ
+| link:netflowAgent-install-windows.adoc[install-windows]
+| этот документ
+
+|===
+
+== Устранение неполадок
+
+См. link:logs-cheatsheet.adoc[памятку по логам] — разделы endpoint и коллектор.

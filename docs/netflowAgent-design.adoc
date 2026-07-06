@@ -40,33 +40,39 @@
 | Ручной запуск из cmd, NetFlow v9; проверена сутками на win-pc01
 | тег `v0.1.1`
 
-| **v0.2.0-test**
-| **тестовая** (установка через `New-Service` — `v0.2.0-test.2`)
-| + Windows Service, лог в файл (`agent.log`)
-| тег `v0.2.0-test.2`, ветка `main`
+| **v0.2.0**
+| **стабильная** (Windows win-pc01)
+| Npcap + exe + config + `install-service.ps1`; служба, лог, reboot OK (принято 2026-07-06)
+| тег `v0.2.0`, ветка `main`
 
 |===
 
 [IMPORTANT]
 ====
-*v0.2.0-test* — тест службы и файлового лога. При проблемах откат на *v0.1.1*: скачать `agent/dist/win-x64/netflowAgent.exe` с тега `v0.1.1`, запуск вручную из cmd (как раньше), без службы.
+*Windows endpoint принят.* Установка вручную (~3 шага): Npcap → скопировать файлы → `install-service.ps1`. Отдельный setup.exe *не планируется* — см. <<решение-без-установщика-windows>>.
+
+Откат на *v0.1.1* (только ручной cmd): тег `v0.1.1`.
 ====
 
 Скачать с GitHub:
 
 [source,bash]
 ----
-# стабильная v0.1.1 (откат)
-git clone --depth 1 --branch v0.1.1 https://github.com/kolixxx/nflowCapAgent.git
+# стабильная Windows v0.2.0
+git clone --depth 1 --branch v0.2.0 https://github.com/kolixxx/nflowCapAgent.git
 
-# тест v0.2.0-test (текущая main)
-git clone https://github.com/kolixxx/nflowCapAgent.git
-# exe: agent/dist/win-x64/netflowAgent.exe
+# откат v0.1.1 (ручной запуск)
+git clone --depth 1 --branch v0.1.1 https://github.com/kolixxx/nflowCapAgent.git
 ----
 
 == Связь с коллектором
 
 См. link:nfsen-ng-install-ubuntu2404.adoc[Установка nfsen-ng], link:logs-cheatsheet.adoc[Памятка: логи и диагностика].
+
+Установка агента на endpoint:
+
+* link:netflowAgent-install-windows.adoc[Windows — Npcap + агент + служба (win-pc01)]
+* link:netflowAgent-install-linux.adoc[Linux — libpcap + агент (ubuntu-pc01)]
 
 [cols="1,1,1,1", options="header"]
 |===
@@ -99,13 +105,13 @@ git clone https://github.com/kolixxx/nflowCapAgent.git
 | **Один** код; различия только OS-слой (capture, service, installer)
 
 | Portable
-| **Нет** — установщики (Windows setup + Npcap, Linux `.deb` / systemd)
+| **Нет** — ручная установка на Windows (Npcap + 3 шага); Linux: systemd / install.sh
 
 | MVP протокол
-| **NetFlow v9** → затем IPFIX
+| **NetFlow v9** → <<этап-3,этап 3 IPFIX>>
 
 | Windows захват
-| **Npcap** (в установщик)
+| **Npcap** — link:netflowAgent-install-windows.adoc#шаг-1-установка-npcap[ручная установка]
 
 | Linux захват
 | **libpcap**
@@ -114,7 +120,7 @@ git clone https://github.com/kolixxx/nflowCapAgent.git
 | **Windows Server 2019 x64** (основной); Win10 client — позже
 
 | Распространение Windows
-| Собранный **`netflowAgent.exe`** (+ setup); Rust на тестовой VM не нужен
+| **`netflowAgent.exe`** + `config.toml` + `install-service.ps1`; инструкция link:netflowAgent-install-windows.adoc[install-windows]
 
 | GitHub (целевой)
 | https://github.com/kolixxx/nflowCapAgent.git
@@ -187,7 +193,7 @@ git clone https://github.com/kolixxx/nflowCapAgent.git
 | **Локальный администратор** (установка Npcap, служба, захват пакетов)
 
 | Доп. ПО на чистой Windows
-| **Npcap** (наш установщик); **VC++ Redistributable 2015–2022** x64 (часто уже есть в Windows Update)
+| **Npcap** — см. link:netflowAgent-install-windows.adoc#шаг-1-установка-npcap[установка Npcap]; **VC++ Redistributable 2015–2022** x64 (часто уже есть в Windows Update)
 
 | Не нужно
 | Rust, Perl, Python, .NET, Wireshark
@@ -203,7 +209,7 @@ git clone https://github.com/kolixxx/nflowCapAgent.git
 * [ ] `winver` — Windows 10 x64
 * [ ] `ping 192.168.30.36`
 * [ ] Запуск `netflowAgent.exe` **от имени администратора**
-* [ ] Npcap установлен (позже — через наш setup)
+* [ ] Npcap установлен — link:netflowAgent-install-windows.adoc[инструкция Windows]
 
 [source,text]
 ----
@@ -466,19 +472,26 @@ find /var/nfdump/profiles-data/live/win-pc01 -name "nfcapd.*" -ls
 [[этап-2]]
 === Этап 2 — сервис и установка
 
-==== 2a. Windows Service + лог в файл — v0.2.0-test
+==== 2a. Windows Service + лог в файл — v0.2.0 ✅ принят (2026-07-06)
 
 * [x] Логи в файл (`config.toml` → `logging.file`); при ручном запуске — консоль + файл
-* [x] Windows Service (`netflowAgent`), автозапуск
+* [x] Windows Service (`netflowAgent`), автозапуск, reboot
 * [x] CLI: `--install-service`, `--uninstall-service`, `--run-as-service`
-* [x] Скрипты: `agent/scripts/install-service.ps1`, `uninstall-service.ps1`
+* [x] Скрипты: `install-service.ps1`, `uninstall-service.ps1` (`New-Service`)
 * [x] Памятка по логам: link:logs-cheatsheet.adoc[logs-cheatsheet.adoc]
+* [x] Инструкция: link:netflowAgent-install-windows.adoc[install-windows]
+* [x] Тест: служба, uninstall/reinstall, reboot, график `win-pc01`
 
-*Тестер:* установить службу, reboot VM — агент поднялся сам; график `win-pc01` после reboot; лог в `C:\ProgramData\netflowAgent\agent.log`.
+[[решение-без-установщика-windows]]
+==== Решение: без setup.exe на Windows
 
-==== Установка службы (Windows Server 2019)
+Установка сводится к **трём действиям**: Npcap → скопировать `exe` + `config` + ps1 → `install-service.ps1`. Отдельный MSI/setup *не делаем* — усложнение без выгоды для corp-развёртывания.
 
-. Скопировать `netflowAgent.exe` **v0.2.0-test** и `config.toml` в `C:\netflowAgent\`
+Полная инструкция: link:netflowAgent-install-windows.adoc[netflowAgent-install-windows.adoc].
+
+==== Установка службы (кратко)
+
+. Скопировать `netflowAgent.exe` **v0.2.0** и `config.toml` в `C:\netflowAgent\`
 . В `config.toml` задать `[logging] file = "C:\\ProgramData\\netflowAgent\\agent.log"`
 . PowerShell **от администратора** — скрипт `install-service.ps1` (через `New-Service`, не `sc.exe`):
 
@@ -507,20 +520,28 @@ Get-Content C:\ProgramData\netflowAgent\agent.log -Tail 20
 
 . Удаление службы: `.\scripts\uninstall-service.ps1` или `.\netflowAgent.exe --uninstall-service`
 
-==== 2b. Остальное этапа 2 (далее)
+==== 2b. Linux endpoint (далее)
 
-* Установщик Windows (exe + Npcap, или проверка Npcap)
 * Linux: сборка агента, systemd unit
-* `.deb` или `install.sh` для Ubuntu endpoint → `:9996` / `ubuntu-pc01`
+* `install.sh` для Ubuntu endpoint → `:9996` / `ubuntu-pc01`
+* Документация: link:netflowAgent-install-linux.adoc[install-linux]
 
-*Тестер:* установка «как пользователь», reboot VM — агент поднялся сам; график `win-pc01` после reboot.
+*Тестер:* второй источник в nfsen-ng, график `ubuntu-pc01`.
 
+[[этап-3]]
 === Этап 3 — IPFIX и расширение
 
-* IPFIX export (параллельно или вместо v9)
+*После* этапа 2b (Linux agent на `ubuntu-pc01` работает в проде).
+
+* IPFIX export (`format = "ipfix"` в config; nfcapd уже принимает IPFIX)
 * IPv6 flows
 * Фильтры захвата в config
 * Перезагрузка config без переустановки (SIGHUP / API)
+
+[NOTE]
+====
+*Когда IPFIX:* не раньше Linux endpoint. Сначала два стабильных источника (Windows + Linux) на NetFlow v9, затем IPFIX как улучшение протокола без смены коллектора.
+====
 
 == План работ (порядок)
 
@@ -540,33 +561,33 @@ Get-Content C:\ProgramData\netflowAgent\agent.log -Tail 20
 
 | **3**
 | Вы
-| Тест v0.2.0: служба + reboot
-| Служба Running, agent.log, график жив
+| ~~Тест v0.2.0: служба + reboot + uninstall~~ ✅ (2026-07-06)
+| Windows win-pc01 стабилен
 
 | **4**
 | AI
-| ~~Этап 2a: Windows Service + лог в файл~~ ✅ v0.2.0-test
-| exe + install-service.ps1
+| ~~Этап 2a: Windows~~ ✅ v0.2.0
+| install-windows.adoc, без setup.exe
 
 | 5
-| AI
-| Этап 2b: установщик Windows (Npcap)
-| setup.exe или скрипт установки
-
-| 6
 | AI
 | Этап 2b: Linux agent + systemd
 | бинарник + unit для ubuntu-pc01
 
-| 7
+| 6
 | Вы
 | Второй endpoint: Ubuntu → `:9996`, график `ubuntu-pc01`
 | Два источника в nfsen-ng
 
-| 8
+| 7
 | AI
-| Этап 3: IPFIX, IPv6 (по приоритету)
-| config `format = "ipfix"`
+| <<этап-3,Этап 3>>: IPFIX (приоритет), затем IPv6
+| `format = "ipfix"` в config
+
+| 8
+| AI / Вы
+| IPv6, фильтры, hot-reload config
+| по необходимости
 
 |===
 
@@ -589,17 +610,19 @@ cargo build --release
 
 === Перед тестом
 
+Полная инструкция: link:netflowAgent-install-windows.adoc[Установка на Windows].
+
 * [ ] Коллектор: nfcapd на :9995, nfsen-ng работает
 * [ ] Известен IP коллектора
-* [ ] Windows VM: Npcap установлен (позже — через наш setup)
+* [ ] Windows VM: Npcap установлен — link:netflowAgent-install-windows.adoc#шаг-1-установка-npcap[шаг 1]
 * [ ] В `config.toml`: правильные `host` и `port`
 
 [[запуск-агента-checklist]]
 === Запуск агента
 
-Скопируйте на Windows VM папку `agent/dist/win-x64/` (или `netflowAgent.exe` + `config.toml`).
+Скопируйте на Windows VM папку `agent/dist/win-x64/` (см. link:netflowAgent-install-windows.adoc[install-windows]).
 
-. Установите **Npcap** (https://npcap.com/) — галочка «Install Npcap in WinPcap API-compatible Mode».
+. Npcap — link:netflowAgent-install-windows.adoc#шаг-1-установка-npcap[шаг 1 install-windows]
 . Отредактируйте `config.toml`: `collector.host`, `capture.interface` (см. ниже).
 . **От имени администратора** в cmd или PowerShell:
 

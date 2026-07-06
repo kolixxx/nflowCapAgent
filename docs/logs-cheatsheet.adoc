@@ -6,7 +6,7 @@
 
 Краткий справочник: **где смотреть**, **что означает**, **что делать** при проблемах.
 
-См. также: link:netflowAgent-design.adoc[netflowAgent — проект], link:netflowAgent-design.adoc#agent-log[разбор логов агента], link:nfsen-ng-install-ubuntu2404.adoc[установка nfsen-ng].
+См. также: link:netflowAgent-design.adoc[netflowAgent — проект], link:netflowAgent-design.adoc#agent-log[разбор логов агента], link:nfsen-ng-install-ubuntu2404.adoc[установка nfsen-ng], link:netflowAgent-install-windows.adoc[установка Windows], link:netflowAgent-install-linux.adoc[установка Linux].
 
 == Цепочка данных
 
