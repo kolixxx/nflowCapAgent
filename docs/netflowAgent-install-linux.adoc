@@ -102,7 +102,8 @@ nano config.toml
 [source,bash]
 ----
 cd dist/linux-x64
-sudo ./install-linux.sh
+sudo bash install-linux.sh
+# или: chmod +x install-linux.sh && sudo ./install-linux.sh
 ----
 
 Проверка:
