@@ -1,0 +1,23 @@
+# ubuntu-pc01 — edit collector.host if needed
+# See docs/netflowAgent-install-linux.adoc
+
+[collector]
+host = "192.168.30.36"
+port = 9996
+
+[export]
+format = "netflow9"
+observation_domain_id = 1
+source_id = 2
+
+[capture]
+interface = "auto"
+promiscuous = false
+
+[flow]
+active_timeout_secs = 60
+inactive_timeout_secs = 15
+
+[logging]
+level = "info"
+file = "/var/log/netflowAgent/agent.log"

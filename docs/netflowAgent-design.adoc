@@ -42,8 +42,13 @@
 
 | **v0.2.0**
 | **стабильная** (Windows win-pc01)
-| Npcap + exe + config + `install-service.ps1`; служба, лог, reboot OK (принято 2026-07-06)
-| тег `v0.2.0`, ветка `main`
+| Npcap + служба + ps1; принято 2026-07-06
+| тег `v0.2.0`
+
+| **v0.2.1**
+| **тест** (Linux ubuntu-pc01)
+| libpcap + systemd + `build-linux.sh` / `install-linux.sh`; тест Ubuntu 18.04
+| тег `v0.2.1-linux-test`, ветка `main`
 
 |===
 
@@ -520,13 +525,15 @@ Get-Content C:\ProgramData\netflowAgent\agent.log -Tail 20
 
 . Удаление службы: `.\scripts\uninstall-service.ps1` или `.\netflowAgent.exe --uninstall-service`
 
-==== 2b. Linux endpoint (далее)
+==== 2b. Linux endpoint — v0.2.1 (тест на Ubuntu 18.04)
 
-* Linux: сборка агента, systemd unit
-* `install.sh` для Ubuntu endpoint → `:9996` / `ubuntu-pc01`
-* Документация: link:netflowAgent-install-linux.adoc[install-linux]
+* [x] Сборка на Linux (`scripts/build-linux.sh`)
+* [x] systemd unit + `install-linux.sh` / `uninstall-linux.sh`
+* [x] config для `ubuntu-pc01` → порт **9996**
+* [x] Документация: link:netflowAgent-install-linux.adoc[install-linux] (Ubuntu 18.04)
+* [x] `interface = auto` — пропуск `lo`
 
-*Тестер:* второй источник в nfsen-ng, график `ubuntu-pc01`.
+*Тестер:* Ubuntu 18.04, `./build-linux.sh` → `install-linux.sh`, график `ubuntu-pc01` в nfsen-ng.
 
 [[этап-3]]
 === Этап 3 — IPFIX и расширение
@@ -571,12 +578,12 @@ Get-Content C:\ProgramData\netflowAgent\agent.log -Tail 20
 
 | 5
 | AI
-| Этап 2b: Linux agent + systemd
-| бинарник + unit для ubuntu-pc01
+| ~~Этап 2b: Linux agent + systemd~~ ✅ v0.2.1 (код)
+| build-linux.sh, install-linux.sh
 
 | 6
 | Вы
-| Второй endpoint: Ubuntu → `:9996`, график `ubuntu-pc01`
+| Тест Ubuntu 18.04 → `:9996`, график `ubuntu-pc01`
 | Два источника в nfsen-ng
 
 | 7

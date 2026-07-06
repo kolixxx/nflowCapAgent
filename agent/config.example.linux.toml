@@ -1,0 +1,24 @@
+# netflowAgent — example configuration (ubuntu-pc01)
+# Copy to /etc/netflowAgent/config.toml
+
+[collector]
+host = "192.168.30.36"
+port = 9996
+
+[export]
+format = "netflow9"
+observation_domain_id = 1
+source_id = 2
+
+[capture]
+# "auto" = first non-loopback interface (eth0, ens33, enp0s3, …)
+interface = "auto"
+promiscuous = false
+
+[flow]
+active_timeout_secs = 60
+inactive_timeout_secs = 15
+
+[logging]
+level = "info"
+file = "/var/log/netflowAgent/agent.log"

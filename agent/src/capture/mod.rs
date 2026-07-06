@@ -45,11 +45,13 @@ fn resolve_device(request: &str) -> Result<Device> {
 
     devices
         .into_iter()
-        .find(|d| {
-            let n = d.name.to_lowercase();
-            !(n.contains("loopback") || n.contains("npcap loopback"))
-        })
+        .find(|d| !is_loopback_device(&d.name))
         .context("no non-loopback capture device found")
+}
+
+fn is_loopback_device(name: &str) -> bool {
+    let n = name.to_lowercase();
+    n == "lo" || n.contains("loopback") || n.contains("npcap loopback")
 }
 
 fn device_matches(device: &Device, request: &str) -> bool {

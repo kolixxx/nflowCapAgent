@@ -71,7 +71,9 @@ cd C:\netflowAgent
 .\netflowAgent.exe --check-config --config config.toml
 ----
 
-=== Endpoint: Linux (netflowAgent, позже)
+=== Endpoint: Linux (netflowAgent)
+
+См. link:netflowAgent-install-linux.adoc[установка Linux].
 
 [cols="1,2,2", options="header"]
 |===
