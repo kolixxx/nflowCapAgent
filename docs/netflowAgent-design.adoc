@@ -41,32 +41,43 @@
 | тег `v0.1.1`
 
 | **v0.2.0**
-| **стабильная** (Windows win-pc01)
-| Npcap + служба + ps1; принято 2026-07-06
+| стабильная (Windows only)
+| Служба + ps1; суперседед **v0.2.2**
 | тег `v0.2.0`
 
-| **v0.2.1**
-| **тест** (Linux ubuntu-pc01)
-| libpcap + systemd + `build-linux.sh` / `install-linux.sh`; тест Ubuntu 18.04
-| тег `v0.2.1-linux-test`, ветка `main`
+| **v0.2.2**
+| **стабильная** (оба endpoint)
+| NetFlow v9: Windows `win-pc01` :9995 + Linux `ubuntu-pc01` :9996; службы, reboot OK
+| тег `v0.2.2`, link:https://github.com/kolixxx/nflowCapAgent/releases/tag/v0.2.2[Release]
+
+| **v0.1.1**
+| откат (Windows, ручной cmd)
+| Без службы
+| тег `v0.1.1`
 
 |===
 
 [IMPORTANT]
 ====
-*Windows endpoint принят.* Установка вручную (~3 шага): Npcap → скопировать файлы → `install-service.ps1`. Отдельный setup.exe *не планируется* — см. <<решение-без-установщика-windows>>.
+*Релиз v0.2.2* — NetFlow v9 полностью рабочий на **обоих** endpoint-хостах (принято 2026-07-06).
 
-Откат на *v0.1.1* (только ручной cmd): тег `v0.1.1`.
+* Windows: Npcap → `install-service.ps1` — link:netflowAgent-install-windows.adoc[install-windows]
+* Linux: libpcap → `build-linux.sh` → `install-linux.sh` — link:netflowAgent-install-linux.adoc[install-linux]
+
+Setup.exe не планируется. Откат Windows без службы: тег `v0.1.1`.
 ====
 
 Скачать с GitHub:
 
 [source,bash]
 ----
-# стабильная Windows v0.2.0
+# стабильная v0.2.2 (оба endpoint)
+git clone --depth 1 --branch v0.2.2 https://github.com/kolixxx/nflowCapAgent.git
+
+# только Windows (старая метка)
 git clone --depth 1 --branch v0.2.0 https://github.com/kolixxx/nflowCapAgent.git
 
-# откат v0.1.1 (ручной запуск)
+# откат v0.1.1 (ручной запуск Windows)
 git clone --depth 1 --branch v0.1.1 https://github.com/kolixxx/nflowCapAgent.git
 ----
 
@@ -525,20 +536,21 @@ Get-Content C:\ProgramData\netflowAgent\agent.log -Tail 20
 
 . Удаление службы: `.\scripts\uninstall-service.ps1` или `.\netflowAgent.exe --uninstall-service`
 
-==== 2b. Linux endpoint — v0.2.1 (тест на Ubuntu 18.04)
+==== 2b. Linux endpoint — v0.2.2 ✅ принят (2026-07-06)
 
 * [x] Сборка на Linux (`scripts/build-linux.sh`)
 * [x] systemd unit + `install-linux.sh` / `uninstall-linux.sh`
 * [x] config для `ubuntu-pc01` → порт **9996**
 * [x] Документация: link:netflowAgent-install-linux.adoc[install-linux] (Ubuntu 18.04)
-* [x] `interface = auto` — пропуск `lo`
+* [x] `interface = auto` → `ens160` (и аналоги)
+* [x] Тест: график `ubuntu-pc01`, nfdump INVALID=0, reboot OK
 
-*Тестер:* Ubuntu 18.04, `./build-linux.sh` → `install-linux.sh`, график `ubuntu-pc01` в nfsen-ng.
+*Вместе с Windows v0.2.0 → релиз <<versions,v0.2.2>> (NetFlow v9 на обоих endpoint).*
 
 [[этап-3]]
 === Этап 3 — IPFIX и расширение
 
-*После* этапа 2b (Linux agent на `ubuntu-pc01` работает в проде).
+*Следующий этап.* NetFlow v9 на обоих endpoint принят в <<versions,v0.2.2>>.
 
 * IPFIX export (`format = "ipfix"` в config; nfcapd уже принимает IPFIX)
 * IPv6 flows
@@ -547,7 +559,7 @@ Get-Content C:\ProgramData\netflowAgent\agent.log -Tail 20
 
 [NOTE]
 ====
-*Когда IPFIX:* не раньше Linux endpoint. Сначала два стабильных источника (Windows + Linux) на NetFlow v9, затем IPFIX как улучшение протокола без смены коллектора.
+*Когда IPFIX:* этап 2b завершён (v0.2.2). IPFIX — улучшение протокола без смены коллектора.
 ====
 
 == План работ (порядок)
@@ -578,13 +590,13 @@ Get-Content C:\ProgramData\netflowAgent\agent.log -Tail 20
 
 | 5
 | AI
-| ~~Этап 2b: Linux agent + systemd~~ ✅ v0.2.1 (код)
+| ~~Этап 2b: Linux~~ ✅ v0.2.2
 | build-linux.sh, install-linux.sh
 
 | 6
 | Вы
-| Тест Ubuntu 18.04 → `:9996`, график `ubuntu-pc01`
-| Два источника в nfsen-ng
+| ~~Тест Ubuntu 18.04 + оба графика~~ ✅ (2026-07-06)
+| win-pc01 + ubuntu-pc01 в nfsen-ng
 
 | 7
 | AI

@@ -289,4 +289,4 @@ Graphs → source `ubuntu-pc01`. Задержка RRD ~5 мин.
 
 == Версия
 
-Linux endpoint: **v0.2.1** (вместе с Windows v0.2.0 кодовая база). Тег после приёмки теста на Ubuntu 18.04.
+**v0.2.2** — стабильный релиз NetFlow v9 на Windows и Linux. См. link:https://github.com/kolixxx/nflowCapAgent/releases/tag/v0.2.2[GitHub Release v0.2.2].
