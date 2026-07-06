@@ -85,22 +85,17 @@ chmod +x scripts/build-linux.sh scripts/install-linux.sh scripts/uninstall-linux
 
 Результат: `agent/dist/linux-x64/netflowAgent` + `config.toml` + скрипты.
 
-=== 4. Config
-
-Отредактируйте `agent/dist/linux-x64/config.toml`:
-
-* `collector.host` — IP коллектора
-* `collector.port` = **9996**
-* `capture.interface` — `auto` или имя из `--list-devices` (`eth0`, `ens33`, `enp0s3`)
-
-Проверка:
+=== 4. Устройства, config, проверка
 
 [source,bash]
 ----
 cd dist/linux-x64
 sudo ./netflowAgent --list-devices
+nano config.toml
 ./netflowAgent --check-config --config config.toml
 ----
+
+См. <<linux-interface-auto,`interface = auto`>>.
 
 === 5. Установка службы (systemd)
 
@@ -128,21 +123,8 @@ cd dist/linux-x64
 sudo ./uninstall-linux.sh
 ----
 
-Файлы в `/opt/netflowAgent`, `/etc/netflowAgent`, логи — остаются.
-
-== Шаг 1. libpcap (подробно)
-
-Аналог **Npcap** на Windows.
-
-[source,bash]
-----
-sudo apt install -y libpcap0.8
-ldconfig -p | grep libpcap
-----
-
-Для сборки дополнительно: `libpcap-dev`, `pkg-config`.
-
-== Шаг 2. config.toml (ubuntu-pc01)
+[[linux-interface-auto]]
+== config.toml и `interface = auto`
 
 [source,toml]
 ----
@@ -168,7 +150,59 @@ level = "info"
 file = "/var/log/netflowAgent/agent.log"
 ----
 
-== Шаг 3. Ручной запуск (отладка)
+=== `interface = auto` — какой интерфейс выберется
+
+Рекомендуется по умолчанию. Агент берёт **первый** интерфейс из `--list-devices`, который *не* является loopback:
+
+* пропускаются: `lo`, имена с `loopback`
+* не пропускаются: `ens160`, `eth0`, `ens33`, `enp0s3`, `virbr0`, `any` (если окажется раньше в списке)
+
+Пример вывода `--list-devices` на Ubuntu 18.04 (VMware):
+
+[source,text]
+----
+ens160 | -
+any    | Pseudo-device that captures on all interfaces
+lo     | -
+virbr0 | -
+nflog  | Linux netfilter log (NFLOG) interface
+nfqueue| Linux netfilter queue (NFQUEUE) interface
+----
+
+При `interface = auto` будет выбран **`ens160`** (первый не-`lo`).
+
+В логе после старта службы:
+
+[source,text]
+----
+opening capture device  device=ens160  desc=
+----
+
+Чтобы зафиксировать интерфейс явно:
+
+[source,toml]
+----
+interface = "ens160"
+----
+
+[TIP]
+====
+Порядок интерфейсов задаёт libpcap. Если `auto` выбрал не тот NIC (например `virbr0` раньше `eth0`), укажите имя из `--list-devices` вручную.
+====
+
+=== Проверка config
+
+[source,bash]
+----
+cd dist/linux-x64
+./netflowAgent --check-config --config config.toml
+----
+
+Работает **без sudo**: если каталог `/var/log/netflowAgent/` ещё не создан, агент пишет предупреждение и логирует в консоль (это нормально до `install-linux.sh`).
+
+Ожидается: `config OK`.
+
+== Ручной запуск (отладка)
 
 [source,bash]
 ----
@@ -220,6 +254,9 @@ Graphs → source `ubuntu-pc01`. Задержка RRD ~5 мин.
 
 | `version glibc not found` (бинарник с другой Ubuntu)
 | Пересобрать на Ubuntu 18.04: `./scripts/build-linux.sh`
+
+| `failed to open log file` / panic при `--check-config`
+| Нормально до `install-linux.sh`; в v0.2.2+ — предупреждение и лог в консоль. Или: `sudo mkdir -p /var/log/netflowAgent`
 
 |===
 

@@ -137,23 +137,33 @@ pub(crate) fn init_logging(
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let log_file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .unwrap_or_else(|e| panic!("failed to open log file {}: {e}", path.display()));
-        let (writer, guard) = tracing_appender::non_blocking(log_file);
-        file_guard = Some(guard);
+        match OpenOptions::new().create(true).append(true).open(path) {
+            Ok(log_file) => {
+                let (writer, guard) = tracing_appender::non_blocking(log_file);
+                file_guard = Some(guard);
 
-        if console {
-            registry
-                .with(fmt::layer().with_ansi(use_ansi))
-                .with(fmt::layer().with_writer(writer).with_ansi(false))
-                .init();
-        } else {
-            registry
-                .with(fmt::layer().with_writer(writer).with_ansi(false))
-                .init();
+                if console {
+                    registry
+                        .with(fmt::layer().with_ansi(use_ansi))
+                        .with(fmt::layer().with_writer(writer).with_ansi(false))
+                        .init();
+                } else {
+                    registry
+                        .with(fmt::layer().with_writer(writer).with_ansi(false))
+                        .init();
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "warning: cannot open log file {}: {e} (logging to console only)",
+                    path.display()
+                );
+                if console {
+                    registry.with(fmt::layer().with_ansi(use_ansi)).init();
+                } else {
+                    registry.with(fmt::layer().with_ansi(false)).init();
+                }
+            }
         }
     } else if console {
         registry.with(fmt::layer().with_ansi(use_ansi)).init();
