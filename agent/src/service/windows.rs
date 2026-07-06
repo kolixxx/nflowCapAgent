@@ -97,19 +97,21 @@ pub fn run_dispatcher() -> Result<()> {
 
 pub fn install_service(config_path: &str) -> Result<()> {
     let exe = std::env::current_exe().context("resolving executable path")?;
-    let bin_path = format!(
-        "\"{}\" --run-as-service --config \"{}\"",
+    // sc.exe: exe path + arguments must be one quoted binPath value (space after '=').
+    let bin_inner = format!(
+        "\\\"{}\\\" --run-as-service --config \\\"{}\\\"",
         exe.display(),
-        config_path
+        config_path,
     );
+    let bin_path_arg = format!("binPath= \"{bin_inner}\"");
 
     let output = Command::new("sc.exe")
         .args([
             "create",
             SERVICE_NAME,
-            &format!("binPath= {bin_path}"),
+            &bin_path_arg,
             "start= auto",
-            "DisplayName= netflowAgent NetFlow Export",
+            "DisplayName= \"netflowAgent NetFlow Export\"",
         ])
         .output()
         .context("running sc.exe create")?;

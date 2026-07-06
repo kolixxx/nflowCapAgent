@@ -26,6 +26,9 @@ if ($existing) {
 
 Write-Host "Installing service from $exe"
 & $exe --install-service --config $Config
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Service installation failed (exit $LASTEXITCODE)"
+}
 
 Write-Host "Starting service..."
 Start-Service netflowAgent
