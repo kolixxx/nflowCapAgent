@@ -1,0 +1,293 @@
+= Памятка: логи и диагностика netflowAgent + nfsen-ng
+:toc: left
+:toclevels: 2
+:sectnums:
+:revdate: 2026-07-06
+
+Краткий справочник: **где смотреть**, **что означает**, **что делать** при проблемах.
+
+См. также: link:netflowAgent-design.adoc[netflowAgent — проект], link:netflowAgent-design.adoc#agent-log[разбор логов агента], link:nfsen-ng-install-ubuntu2404.adoc[установка nfsen-ng].
+
+== Цепочка данных
+
+[source,text]
+----
+Windows/Linux (netflowAgent)
+    │  лог агента (консоль или файл)
+    │  NetFlow v9 UDP :9995 / :9996
+    ▼
+Ubuntu-коллектор (nfcapd)
+    │  файлы nfcapd.* на диске
+    │  journalctl (systemd)
+    ▼
+nfsen-ng (Docker)
+    │  docker compose logs
+    │  веб-UI :9000 (Graphs, Flows, Admin)
+    ▼
+Графики RRD, таблица Flows
+----
+
+== Где какие логи
+
+=== Endpoint: Windows (netflowAgent)
+
+[cols="1,2,2", options="header"]
+|===
+| Что | Где | Когда смотреть
+
+| Консоль агента
+| Окно cmd/PowerShell, куда запущен `netflowAgent.exe`
+| Ручной запуск (этап 1); отладка
+
+| Файл агента
+| `C:\ProgramData\netflowAgent\agent.log` (путь из `config.toml` → `[logging] file`)
+| Служба Windows (этап 2+); история после reboot
+
+| Конфиг
+| `C:\netflowAgent\config.toml` (или каталог установки)
+| Смена коллектора, интерфейса, уровня логов
+
+| Служба Windows
+| `services.msc` → *netflowAgent*; PowerShell: `Get-Service netflowAgent`
+| Автозапуск, статус Running/Stopped
+
+| Npcap
+| Установлен ли Npcap; `netflowAgent.exe --list-devices`
+| `opening capture device` не появляется, пустой список устройств
+
+|===
+
+[source,powershell]
+----
+# Хвост лога агента (служба)
+Get-Content C:\ProgramData\netflowAgent\agent.log -Tail 30 -Wait
+
+# Статус службы
+Get-Service netflowAgent
+sc.exe query netflowAgent
+
+# Проверка config
+cd C:\netflowAgent
+.\netflowAgent.exe --check-config --config config.toml
+----
+
+=== Endpoint: Linux (netflowAgent, позже)
+
+[cols="1,2,2", options="header"]
+|===
+| Что | Где | Когда смотреть
+
+| Файл агента
+| `/var/log/netflowAgent/agent.log` (из config)
+| systemd unit, отладка
+
+| journald
+| `journalctl -u netflowAgent -f`
+| Служба не стартует, краш при boot
+
+| Конфиг
+| `/etc/netflowAgent/config.toml`
+| Смена параметров
+
+|===
+
+=== Коллектор: nfcapd (Ubuntu)
+
+[cols="1,2,2", options="header"]
+|===
+| Что | Где | Когда смотреть
+
+| Flow-файлы на диске
+| `/var/nfdump/profiles-data/live/win-pc01/` +
+  `/var/nfdump/profiles-data/live/ubuntu-pc01/`
+| Агент шлёт, но в UI пусто — есть ли `nfcapd.*`?
+
+| Просмотр flows в терминале
+| `nfdump -R /var/nfdump/profiles-data/live/win-pc01 -c 20 -o extended`
+| Проверка содержимого, INVALID, IP/порты
+
+| Служба nfcapd
+| `journalctl -u nfcapd-win-pc01 -f` +
+  `journalctl -u nfcapd-ubuntu-pc01 -f`
+| Порт не слушается, nfcapd упал
+
+| Статус портов
+| `ss -ulnp | grep -E '9995|9996'`
+| UDP доходит ли до коллектора
+
+| Захват UDP (отладка)
+| `sudo tcpdump -ni any udp port 9995 -c 5`
+| Firewall / неверный IP агента
+
+|===
+
+[IMPORTANT]
+====
+Путь к данным — **`/var/nfdump/profiles-data/live/<source>/`**, не `/var/cache/nfsen/`.
+====
+
+[source,bash]
+----
+# Последние файлы win-pc01
+find /var/nfdump/profiles-data/live/win-pc01 -name "nfcapd.*" | tail -5
+
+# 20 flow-записей
+nfdump -R /var/nfdump/profiles-data/live/win-pc01 -c 20 -o extended
+
+# Счётчик INVALID (0 = хорошо)
+nfdump -R /var/nfdump/profiles-data/live/win-pc01 -o extended 2>/dev/null | grep -c INVALID
+
+# Службы nfcapd
+sudo systemctl status nfcapd-win-pc01 nfcapd-ubuntu-pc01
+----
+
+=== Коллектор: nfsen-ng (Docker)
+
+[cols="1,2,2", options="header"]
+|===
+| Что | Где | Когда смотреть
+
+| Логи контейнера
+| `docker compose -f ~/nfsen-ng/docker-compose.yml logs -f nfsen`
+| UI не открывается, import daemon, ошибки PHP
+
+| Веб-UI Admin
+| http://\<collector\>:9000 → вкладка *Admin*
+| *Last auto import*, *Capture freshness*, *Watching N dirs*
+
+| Графики
+| Graphs → source `win-pc01`, DATA TYPE *Traffic* или *Flows*
+| Визуальная проверка; задержка RRD ~5 мин
+
+| Таблица flows
+| Flows → source, интервал → *Process data*
+| Детали соединений; строка `nfdump -R` внизу
+
+| RRD на диске (редко)
+| внутри контейнера `/var/www/html/nfsen-ng/backend/datasources/data/`
+| Сброс после смены TZ — см. link:nfsen-ng-install-ubuntu2404.adoc#переимпорт-rrd[переимпорт RRD]
+
+|===
+
+[source,bash]
+----
+cd ~/nfsen-ng
+docker compose logs -f nfsen          # Ctrl+C — выход, контейнер работает
+docker compose ps
+docker compose exec nfsen env | grep -E 'TZ|NFCAPD|NFSEN'
+----
+
+== Симптом → куда смотреть
+
+[cols="2,2,2", options="header"]
+|===
+| Симптом | Сначала проверить | Потом
+
+| Агент не стартует (Windows)
+| `agent.log`, `--check-config`, Npcap, права admin
+| `Get-Service netflowAgent`, Event Viewer (Application)
+
+| Нет `exporting expired flows`
+| Консоль/файл агента; трафик на NIC; `--list-devices`
+| `interface` в config; promiscuous
+
+| `export failed` в логе агента
+| ping до коллектора, firewall Windows
+| `tcpdump` на :9995, IP в config
+
+| Файлов `nfcapd.*` нет на диске
+| Агент работает? `ss -ulnp` :9995
+| `tcpdump`, firewall ufw
+
+| Файлы есть, Graphs пустые
+| Admin → *Capture freshness*; подождать ~5 мин
+| *Trigger Import*; TZ (`edge` + `NFCAPD_TZ`) — link:nfsen-ng-install-ubuntu2404.adoc#tz-empty-ui[сдвиг TZ]
+
+| Graphs Traffic = 0, Flows есть
+| Нормально при малом трафике
+| Сгенерировать трафик (браузер), смотреть *Traffic*
+
+| `Event: INVALID` в nfdump
+| `nfdump -o extended`, версия агента ≥ v0.1.1
+| Обновить exe на endpoint
+
+| После reboot Windows график плоский
+| `Get-Service netflowAgent` = Running
+| `agent.log` после reboot
+
+| `ubuntu-pc01` красный в Admin
+| Агент на Ubuntu ещё не установлен
+| Ожидаемо до этапа Linux endpoint
+
+|===
+
+== Ключевые сообщения агента
+
+Подробно: link:netflowAgent-design.adoc#agent-log[Лог netflowAgent (консоль)].
+
+[cols="1,1,2", options="header"]
+|===
+| Сообщение | Уровень | Значение
+
+| `netflowAgent starting`
+| INFO
+| Старт OK; `target`, `version`, `interface`
+
+| `NetFlow v9 exporter ready`
+| INFO
+| UDP на коллектор готов
+
+| `exporting expired flows flows=N active=M`
+| INFO
+| **Норма** — N flow отправлено, M ещё активных
+
+| `export failed`
+| ERROR
+| UDP не ушёл — сеть/firewall
+
+| `capture read error`
+| WARN
+| Сбой Npcap; часто временный
+
+| `config OK`
+| INFO
+| `--check-config` прошёл
+
+|===
+
+Время в логе агента — **UTC** (`Z`). MSK = UTC + 3.
+
+== Ключевые места в nfsen-ng UI
+
+[cols="1,2", options="header"]
+|===
+| Экран | Зачем
+
+| Graphs → `win-pc01` → Traffic / Flows
+| Есть ли данные за последний час
+
+| Flows → Process data
+| Список соединений; проверка IP `192.168.30.16`
+
+| Admin → Last auto import
+| Работает ли import daemon (~5 мин)
+
+| Admin → Capture freshness
+| Свежесть файлов nfcapd по источнику
+
+| Admin → Trigger Import
+| Не ждать auto-import
+
+| Admin → Force Rescan
+| Только после смены TZ/источников/сброса RRD
+
+|===
+
+== Быстрая проверка «всё живо»
+
+. **Windows:** в `agent.log` (или консоли) есть свежие `exporting expired flows`.
+. **Коллектор:** `find .../live/win-pc01 -name nfcapd.*` — файлы за сегодня.
+. **nfdump:** `nfdump -c 5` — flows с IP endpoint-хоста.
+. **UI:** Graphs LIVE, last update не старше ~10 мин.
+
+Если все четыре пункта OK — система работает; rescan не нужен.

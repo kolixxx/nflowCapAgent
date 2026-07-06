@@ -3,7 +3,7 @@
 :toclevels: 3
 :sectnums:
 :author: netflowAgent
-:revdate: 2026-07-04
+:revdate: 2026-07-06
 
 == Роли
 
@@ -28,9 +28,45 @@
 . экспортирует **NetFlow v9** (MVP) → позже **IPFIX**;
 . отправляет UDP на **nfcapd** коллектора (nfsen-ng).
 
+[[versions]]
+== Версии (скачивание)
+
+[cols="1,1,2,1", options="header"]
+|===
+| Версия | Статус | Содержимое | Git
+
+| **v0.1.1**
+| **стабильная** (откат)
+| Ручной запуск из cmd, NetFlow v9; проверена сутками на win-pc01
+| тег `v0.1.1`
+
+| **v0.2.0-test**
+| **тестовая**
+| + Windows Service, лог в файл (`agent.log`)
+| тег `v0.2.0-test`, ветка `main`
+
+|===
+
+[IMPORTANT]
+====
+*v0.2.0-test* — тест службы и файлового лога. При проблемах откат на *v0.1.1*: скачать `agent/dist/win-x64/netflowAgent.exe` с тега `v0.1.1`, запуск вручную из cmd (как раньше), без службы.
+====
+
+Скачать с GitHub:
+
+[source,bash]
+----
+# стабильная v0.1.1 (откат)
+git clone --depth 1 --branch v0.1.1 https://github.com/kolixxx/nflowCapAgent.git
+
+# тест v0.2.0-test (текущая main)
+git clone https://github.com/kolixxx/nflowCapAgent.git
+# exe: agent/dist/win-x64/netflowAgent.exe
+----
+
 == Связь с коллектором
 
-См. link:nfsen-ng-install-ubuntu2404.adoc[Установка nfsen-ng].
+См. link:nfsen-ng-install-ubuntu2404.adoc[Установка nfsen-ng], link:logs-cheatsheet.adoc[Памятка: логи и диагностика].
 
 [cols="1,1,1,1", options="header"]
 |===
@@ -222,9 +258,31 @@ netflowAgent_win-linux/
 ----
 
 [[agent-log]]
-== Лог netflowAgent (консоль)
+== Лог netflowAgent
 
-При запуске `netflowAgent.exe --config config.toml` агент пишет события в **stdout** (окно cmd/PowerShell). Уровень задаётся `logging.level` в config (по умолчанию `info`).
+Полная памятка по всей цепочке (агент + nfcapd + nfsen-ng): link:logs-cheatsheet.adoc[logs-cheatsheet.adoc].
+
+=== Куда пишется
+
+[cols="1,2,2", options="header"]
+|===
+| Режим | Куда | Путь по умолчанию
+
+| Ручной запуск (cmd)
+| stdout (консоль)
+| —
+
+| Служба Windows (этап 2+)
+| файл из config
+| `C:\ProgramData\netflowAgent\agent.log`
+
+| Linux systemd (позже)
+| файл + journald
+| `/var/log/netflowAgent/agent.log`
+
+|===
+
+Уровень — `logging.level` в config (по умолчанию `info`). Если задан `logging.file`, события **дублируются** в файл (и в консоль при ручном запуске).
 
 === Стартовые строки (один раз)
 
@@ -408,8 +466,44 @@ find /var/nfdump/profiles-data/live/win-pc01 -name "nfcapd.*" -ls
 [[этап-2]]
 === Этап 2 — сервис и установка
 
-* Windows Service (автозапуск, без окна cmd)
-* Логи в файл (`config.toml` → `logging.file`)
+==== 2a. Windows Service + лог в файл — v0.2.0-test
+
+* [x] Логи в файл (`config.toml` → `logging.file`); при ручном запуске — консоль + файл
+* [x] Windows Service (`netflowAgent`), автозапуск
+* [x] CLI: `--install-service`, `--uninstall-service`, `--run-as-service`
+* [x] Скрипты: `agent/scripts/install-service.ps1`, `uninstall-service.ps1`
+* [x] Памятка по логам: link:logs-cheatsheet.adoc[logs-cheatsheet.adoc]
+
+*Тестер:* установить службу, reboot VM — агент поднялся сам; график `win-pc01` после reboot; лог в `C:\ProgramData\netflowAgent\agent.log`.
+
+==== Установка службы (Windows Server 2019)
+
+. Скопировать `netflowAgent.exe` **v0.2.0-test** и `config.toml` в `C:\netflowAgent\`
+. В `config.toml` задать `[logging] file = "C:\\ProgramData\\netflowAgent\\agent.log"`
+. PowerShell **от администратора**:
+
+[source,powershell]
+----
+cd C:\netflowAgent
+.\netflowAgent.exe --check-config --config config.toml
+.\scripts\install-service.ps1
+# или вручную:
+.\netflowAgent.exe --install-service --config config.toml
+sc start netflowAgent
+----
+
+. Проверка:
+
+[source,powershell]
+----
+Get-Service netflowAgent
+Get-Content C:\ProgramData\netflowAgent\agent.log -Tail 20
+----
+
+. Удаление службы: `.\scripts\uninstall-service.ps1` или `.\netflowAgent.exe --uninstall-service`
+
+==== 2b. Остальное этапа 2 (далее)
+
 * Установщик Windows (exe + Npcap, или проверка Npcap)
 * Linux: сборка агента, systemd unit
 * `.deb` или `install.sh` для Ubuntu endpoint → `:9996` / `ubuntu-pc01`
@@ -436,27 +530,27 @@ find /var/nfdump/profiles-data/live/win-pc01 -name "nfcapd.*" -ls
 
 | **2**
 | Вы
-| Тест v0.1.1 на Win Server 2019 (~30–60 мин)
-| OK / список замечаний
+| ~~Тест v0.1.1~~ ✅ принят (2026-07-06)
+| INVALID=0, график за сутки
 
 | **3**
-| AI
-| Этап 2: Windows Service + лог в файл
-| exe + инструкция «установка службы»
-
-| 4
 | Вы
-| Тест службы: reboot, автозапуск
-| Служба работает без cmd
+| Тест v0.2.0: служба + reboot
+| Служба Running, agent.log, график жив
+
+| **4**
+| AI
+| ~~Этап 2a: Windows Service + лог в файл~~ ✅ v0.2.0-test
+| exe + install-service.ps1
 
 | 5
 | AI
-| Этап 2: установщик Windows (Npcap)
+| Этап 2b: установщик Windows (Npcap)
 | setup.exe или скрипт установки
 
 | 6
 | AI
-| Этап 2: Linux agent + systemd
+| Этап 2b: Linux agent + systemd
 | бинарник + unit для ubuntu-pc01
 
 | 7

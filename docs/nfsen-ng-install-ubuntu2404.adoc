@@ -789,8 +789,15 @@ sudo systemctl status nfcapd
 * [ ] *(позже, когда будут агенты)* flow-файлы в каталогах, Initial Import в Admin
 * [ ] *(позже)* win-pc01 → :9995, ubuntu-pc01 → :9996
 
+[[logs-cheatsheet]]
+== Памятка: логи и диагностика
+
+Краткий справочник «симптом → куда смотреть» для агента, nfcapd и nfsen-ng: link:logs-cheatsheet.adoc[logs-cheatsheet.adoc].
+
 == Ссылки
 
+* link:logs-cheatsheet.adoc[Памятка: логи и диагностика]
+* link:netflowAgent-design.adoc[netflowAgent — проект и план]
 * link:https://github.com/mbolli/nfsen-ng[nfsen-ng на GitHub]
 * link:https://github.com/mbolli/nfsen-ng/wiki/Installation[Wiki: Installation]
 * link:https://github.com/mbolli/nfsen-ng/wiki/Configuration[Wiki: Configuration]

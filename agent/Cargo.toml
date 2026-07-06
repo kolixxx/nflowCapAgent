@@ -1,6 +1,6 @@
 [package]
 name = "netflow_agent"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 description = "Host NetFlow/IPFIX export agent for Windows and Linux"
 license = "MIT OR Apache-2.0"
@@ -18,6 +18,10 @@ serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.7"
 
 [profile.release]
 lto = true

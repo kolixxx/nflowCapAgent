@@ -9,7 +9,7 @@ use tracing::{error, info, warn};
 
 const EXPIRE_SCAN_INTERVAL_MS: u128 = 1000;
 
-pub fn run(cfg: &Config) -> Result<()> {
+pub fn run(cfg: &Config, shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Result<()> {
     describe_flows(cfg);
 
     let mut cap = open_capture(cfg)?;
@@ -24,6 +24,11 @@ pub fn run(cfg: &Config) -> Result<()> {
     let mut last_expire = Instant::now();
 
     loop {
+        if shutdown.load(std::sync::atomic::Ordering::Relaxed) {
+            info!("shutdown requested, stopping");
+            return Ok(());
+        }
+
         match cap.next_packet() {
             Ok(packet) => {
                 let now = Instant::now();
