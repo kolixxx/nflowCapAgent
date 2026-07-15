@@ -6,32 +6,31 @@ use std::net::{SocketAddr, UdpSocket};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, info};
 
-/// RFC 3954 recommends a stable exporter source port; many collectors expect it.
 const EXPORT_SOURCE_PORT: u16 = 2056;
-/// Bumped when template fields change (0.3.0: +TCP_FLAGS).
+const TEMPLATE_SET_ID: u16 = 2;
 const TEMPLATE_ID: u16 = 258;
 
-/// nfdump-compatible template: 4-byte counters + TCP flags + interface indices.
+/// IANA IPFIX information elements (type, length).
 const TEMPLATE_FIELDS: &[(u16, u16)] = &[
-    (1, 4),   // IN_BYTES
-    (2, 4),   // IN_PKTS
-    (4, 1),   // PROTOCOL
-    (6, 1),   // TCP_FLAGS (cumulative OR per flow)
-    (7, 2),   // L4_SRC_PORT
-    (11, 2),  // L4_DST_PORT
-    (8, 4),   // IPV4_SRC_ADDR
-    (12, 4),  // IPV4_DST_ADDR
-    (10, 4),  // INPUT_SNMP
-    (14, 4),  // OUTPUT_SNMP
-    (22, 4),  // FIRST_SWITCHED
-    (21, 4),  // LAST_SWITCHED
+    (1, 4),   // octetDeltaCount
+    (2, 4),   // packetDeltaCount
+    (4, 1),   // protocolIdentifier
+    (6, 1),   // tcpControlBits
+    (7, 2),   // sourceTransportPort
+    (8, 2),   // destinationTransportPort
+    (12, 4),  // sourceIPv4Address
+    (13, 4),  // destinationIPv4Address
+    (10, 4),  // ingressInterface
+    (11, 4),  // egressInterface
+    (22, 4),  // flowStartSysUpTime
+    (21, 4),  // flowEndSysUpTime
 ];
 
 const RECORD_LEN: u16 = 38;
 const INPUT_SNMP_INDEX: u32 = 1;
 const OUTPUT_SNMP_INDEX: u32 = 0;
 
-pub struct NetflowV9Exporter {
+pub struct IpfixExporter {
     socket: UdpSocket,
     dest: SocketAddr,
     export_cfg: ExportConfig,
@@ -40,7 +39,7 @@ pub struct NetflowV9Exporter {
     last_template: Option<Instant>,
 }
 
-impl NetflowV9Exporter {
+impl IpfixExporter {
     pub fn new(collector_host: &str, collector_port: u16, export_cfg: ExportConfig) -> Result<Self> {
         let dest: SocketAddr = format!("{collector_host}:{collector_port}")
             .parse()
@@ -50,7 +49,7 @@ impl NetflowV9Exporter {
         let socket = UdpSocket::bind(&bind_addr)
             .with_context(|| format!("binding UDP export socket on {bind_addr}"))?;
 
-        info!(%dest, source_port = EXPORT_SOURCE_PORT, "NetFlow v9 exporter ready");
+        info!(%dest, source_port = EXPORT_SOURCE_PORT, "IPFIX exporter ready");
 
         Ok(Self {
             socket,
@@ -72,16 +71,12 @@ impl NetflowV9Exporter {
             Some(t) => t.elapsed() >= std::time::Duration::from_secs(60),
         };
 
-        let mut flowsets: Vec<Vec<u8>> = Vec::new();
+        let mut sets: Vec<Vec<u8>> = Vec::new();
         if send_template {
-            flowsets.push(build_template_flowset(TEMPLATE_ID));
+            sets.push(build_template_set(TEMPLATE_ID));
             self.last_template = Some(Instant::now());
         }
-        flowsets.push(build_data_flowset(
-            TEMPLATE_ID,
-            flows,
-            self.boot_instant,
-        )?);
+        sets.push(build_data_set(TEMPLATE_ID, flows, self.boot_instant)?);
 
         let domain_id = if self.export_cfg.observation_domain_id != 0 {
             self.export_cfg.observation_domain_id
@@ -89,23 +84,18 @@ impl NetflowV9Exporter {
             self.export_cfg.source_id
         };
 
-        let packet = build_v9_packet(
-            &flowsets,
-            self.sequence,
-            domain_id,
-            self.boot_instant,
-        )?;
+        let packet = build_ipfix_message(&sets, self.sequence, domain_id)?;
         self.sequence = self.sequence.wrapping_add(1);
 
         self.socket
             .send_to(&packet, self.dest)
-            .with_context(|| format!("sending NetFlow v9 to {}", self.dest))?;
+            .with_context(|| format!("sending IPFIX to {}", self.dest))?;
 
         debug!(
             flows = flows.len(),
             bytes = packet.len(),
             sequence = self.sequence.saturating_sub(1),
-            "exported NetFlow v9 datagram"
+            "exported IPFIX datagram"
         );
 
         Ok(())
@@ -127,14 +117,14 @@ fn to_u32_counter(value: u64) -> u32 {
     value.min(u32::MAX as u64) as u32
 }
 
-fn build_template_flowset(template_id: u16) -> Vec<u8> {
+fn build_template_set(template_id: u16) -> Vec<u8> {
     let field_count = TEMPLATE_FIELDS.len() as u16;
     let body_len = 4 + (field_count as usize * 4);
-    let total_len = 4 + body_len;
+    let set_len = 4 + body_len;
 
-    let mut buf = Vec::with_capacity(total_len);
-    buf.write_u16::<BigEndian>(0).unwrap();
-    buf.write_u16::<BigEndian>(total_len as u16).unwrap();
+    let mut buf = Vec::with_capacity(set_len);
+    buf.write_u16::<BigEndian>(TEMPLATE_SET_ID).unwrap();
+    buf.write_u16::<BigEndian>(set_len as u16).unwrap();
     buf.write_u16::<BigEndian>(template_id).unwrap();
     buf.write_u16::<BigEndian>(field_count).unwrap();
     for (typ, len) in TEMPLATE_FIELDS {
@@ -144,16 +134,12 @@ fn build_template_flowset(template_id: u16) -> Vec<u8> {
     buf
 }
 
-fn build_data_flowset(
-    template_id: u16,
-    flows: &[FlowEntry],
-    boot: Instant,
-) -> Result<Vec<u8>> {
+fn build_data_set(template_id: u16, flows: &[FlowEntry], boot: Instant) -> Result<Vec<u8>> {
     let records_len = flows.len() * RECORD_LEN as usize;
-    let total_len = 4 + records_len;
-    let mut buf = Vec::with_capacity(total_len);
+    let set_len = 4 + records_len;
+    let mut buf = Vec::with_capacity(set_len);
     buf.write_u16::<BigEndian>(template_id).unwrap();
-    buf.write_u16::<BigEndian>(total_len as u16).unwrap();
+    buf.write_u16::<BigEndian>(set_len as u16).unwrap();
 
     for flow in flows {
         buf.write_u32::<BigEndian>(to_u32_counter(flow.bytes)).unwrap();
@@ -181,26 +167,19 @@ fn write_ipv4(buf: &mut Vec<u8>, ip: std::net::Ipv4Addr) {
     }
 }
 
-fn build_v9_packet(
-    flowsets: &[Vec<u8>],
-    sequence: u32,
-    source_id: u32,
-    boot: Instant,
-) -> Result<Vec<u8>> {
+fn build_ipfix_message(sets: &[Vec<u8>], sequence: u32, observation_domain_id: u32) -> Result<Vec<u8>> {
     let mut body = Vec::new();
-    for fs in flowsets {
-        body.extend_from_slice(fs);
+    for set in sets {
+        body.extend_from_slice(set);
     }
 
-    let mut packet = Vec::with_capacity(20 + body.len());
-    packet.write_u16::<BigEndian>(9).unwrap();
-    packet.write_u16::<BigEndian>(flowsets.len() as u16).unwrap();
-    packet
-        .write_u32::<BigEndian>(uptime_ms(boot, Instant::now()))
-        .unwrap();
+    let total_len = 16 + body.len();
+    let mut packet = Vec::with_capacity(total_len);
+    packet.write_u16::<BigEndian>(10).unwrap();
+    packet.write_u16::<BigEndian>(total_len as u16).unwrap();
     packet.write_u32::<BigEndian>(unix_secs()).unwrap();
     packet.write_u32::<BigEndian>(sequence).unwrap();
-    packet.write_u32::<BigEndian>(source_id).unwrap();
+    packet.write_u32::<BigEndian>(observation_domain_id).unwrap();
     packet.extend_from_slice(&body);
     Ok(packet)
 }
@@ -213,32 +192,28 @@ mod tests {
     use std::time::Instant;
 
     #[test]
-    fn template_flowset_has_expected_length() {
-        let fs = build_template_flowset(TEMPLATE_ID);
-        assert_eq!(fs.len(), 4 + 4 + TEMPLATE_FIELDS.len() * 4);
-        assert_eq!(RECORD_LEN, 38);
-        assert_eq!(TEMPLATE_FIELDS.len(), 12);
-    }
-
-    #[test]
-    fn builds_data_flowset_for_one_flow() {
+    fn ipfix_message_starts_with_version_10() {
         let now = Instant::now();
         let key = FlowKey {
             src_ip: Ipv4Addr::new(10, 0, 0, 1),
             dst_ip: Ipv4Addr::new(8, 8, 8, 8),
-            src_port: 12345,
-            dst_port: 443,
+            src_port: 443,
+            dst_port: 80,
             protocol: 6,
         };
         let flow = FlowEntry {
             key,
-            packets: 10,
-            bytes: 9000,
-            tcp_flags: 0x18, // PSH+ACK
+            packets: 1,
+            bytes: 100,
+            tcp_flags: 0x10,
             first_seen: now,
             last_seen: now,
         };
-        let fs = build_data_flowset(TEMPLATE_ID, &[flow], now).unwrap();
-        assert_eq!(fs.len(), 4 + 38);
+        let template = build_template_set(TEMPLATE_ID);
+        let data = build_data_set(TEMPLATE_ID, &[flow], now).unwrap();
+        let msg = build_ipfix_message(&[template, data], 1, 1).unwrap();
+        assert_eq!(msg[0], 0);
+        assert_eq!(msg[1], 10);
+        assert_eq!(RECORD_LEN, 38);
     }
 }

@@ -289,4 +289,4 @@ Graphs → source `ubuntu-pc01`. Задержка RRD ~5 мин.
 
 == Версия
 
-**v0.2.2** — стабильный релиз NetFlow v9 на Windows и Linux. См. link:https://github.com/kolixxx/nflowCapAgent/releases/tag/v0.2.2[GitHub Release v0.2.2].
+**v0.3.0** — NetFlow v9 / IPFIX + TCP flags. Откат: тег `v0.2.2`.

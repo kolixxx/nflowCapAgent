@@ -32,8 +32,8 @@ pub fn run(cfg: &Config, shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>
         match cap.next_packet() {
             Ok(packet) => {
                 let now = Instant::now();
-                if let Some((key, bytes)) = parse_ethernet_ipv4(packet.data) {
-                    table.observe(key, bytes, now);
+                if let Some(pkt) = parse_ethernet_ipv4(packet.data) {
+                    table.observe(pkt.key, pkt.frame_bytes, pkt.tcp_flags, now);
                 }
             }
             Err(PcapError::TimeoutExpired) => {}

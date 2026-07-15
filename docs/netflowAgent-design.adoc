@@ -41,14 +41,19 @@
 | тег `v0.1.1`
 
 | **v0.2.0**
-| стабильная (Windows only)
-| Служба + ps1; суперседед **v0.2.2**
+| старая (Windows only)
+| Служба + ps1
 | тег `v0.2.0`
 
+| **v0.3.0**
+| **текущая** (IPFIX + TCP flags)
+| `format = "ipfix"` или `netflow9` (template 258); оба endpoint
+| тег `v0.3.0`
+
 | **v0.2.2**
-| **стабильная** (оба endpoint)
-| NetFlow v9: Windows `win-pc01` :9995 + Linux `ubuntu-pc01` :9996; службы, reboot OK
-| тег `v0.2.2`, link:https://github.com/kolixxx/nflowCapAgent/releases/tag/v0.2.2[Release]
+| стабильная (откат NetFlow v9 без flags)
+| win-pc01 + ubuntu-pc01
+| тег `v0.2.2`
 
 | **v0.1.1**
 | откат (Windows, ручной cmd)
@@ -59,26 +64,23 @@
 
 [IMPORTANT]
 ====
-*Релиз v0.2.2* — NetFlow v9 полностью рабочий на **обоих** endpoint-хостах (принято 2026-07-06).
+*v0.3.0* — IPFIX + TCP flags на **обоих** endpoint. Откат без flags: тег `v0.2.2`.
 
-* Windows: Npcap → `install-service.ps1` — link:netflowAgent-install-windows.adoc[install-windows]
-* Linux: libpcap → `build-linux.sh` → `install-linux.sh` — link:netflowAgent-install-linux.adoc[install-linux]
+* `format = "netflow9"` — NetFlow v9 template 258 (+ TCP_FLAGS)
+* `format = "ipfix"` — IPFIX (nfcapd принимает оба)
 
-Setup.exe не планируется. Откат Windows без службы: тег `v0.1.1`.
+Windows: link:netflowAgent-install-windows.adoc[install-windows]. Linux: link:netflowAgent-install-linux.adoc[install-linux].
 ====
 
 Скачать с GitHub:
 
 [source,bash]
 ----
-# стабильная v0.2.2 (оба endpoint)
+# v0.3.0 (IPFIX + TCP flags)
+git clone --depth 1 --branch v0.3.0 https://github.com/kolixxx/nflowCapAgent.git
+
+# откат v0.2.2 (NetFlow v9 без flags)
 git clone --depth 1 --branch v0.2.2 https://github.com/kolixxx/nflowCapAgent.git
-
-# только Windows (старая метка)
-git clone --depth 1 --branch v0.2.0 https://github.com/kolixxx/nflowCapAgent.git
-
-# откат v0.1.1 (ручной запуск Windows)
-git clone --depth 1 --branch v0.1.1 https://github.com/kolixxx/nflowCapAgent.git
 ----
 
 == Связь с коллектором
@@ -548,19 +550,30 @@ Get-Content C:\ProgramData\netflowAgent\agent.log -Tail 20
 *Вместе с Windows v0.2.0 → релиз <<versions,v0.2.2>> (NetFlow v9 на обоих endpoint).*
 
 [[этап-3]]
-=== Этап 3 — IPFIX и расширение
+=== Этап 3 — IPFIX и TCP flags — v0.3.0
 
-*Следующий этап.* NetFlow v9 на обоих endpoint принят в <<versions,v0.2.2>>.
+* [x] **TCP flags** — cumulative OR по пакетам TCP (NetFlow IE 6 / IPFIX tcpControlBits)
+* [x] **IPFIX export** — `format = "ipfix"` в config
+* [x] NetFlow v9 template **258** (+ TCP_FLAGS)
+* [ ] Тест на обоих endpoint + nfdump/nfsen-ng
+* [ ] IPv6 flows (далее)
+* [ ] Фильтры захвата в config
+* [ ] Перезагрузка config без переустановки (SIGHUP / API)
 
-* IPFIX export (`format = "ipfix"` в config; nfcapd уже принимает IPFIX)
-* IPv6 flows
-* Фильтры захвата в config
-* Перезагрузка config без переустановки (SIGHUP / API)
+==== TCP flags
 
-[NOTE]
-====
-*Когда IPFIX:* этап 2b завершён (v0.2.2). IPFIX — улучшение протокола без смены коллектора.
-====
+Агент **до v0.3.0 не собирал** TCP flags — только 5-tuple, байты и пакеты.
+
+С **v0.3.0**: для каждого TCP-пакета читается байт flags (offset 13 заголовка TCP); в flow — **побитовое OR** всех пакетов (стандарт NetFlow/nfdump: `flags` в extended output).
+
+UDP: `tcp_flags = 0`.
+
+Проверка после экспорта:
+
+[source,bash]
+----
+nfdump -R .../live/win-pc01 -c 10 -o extended | grep -E 'flags|Flags'
+----
 
 == План работ (порядок)
 

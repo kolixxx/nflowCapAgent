@@ -1,6 +1,8 @@
-netflowAgent — Linux endpoint (ubuntu-pc01)
+netflowAgent v0.3.0 — Linux endpoint (ubuntu-pc01)
 
-Binary is NOT included — build on the target host (Ubuntu 18.04+):
+Features: NetFlow v9 (template 258) or IPFIX, TCP flags in flows.
+
+Build on the target host (Ubuntu 18.04+):
 
   git clone https://github.com/kolixxx/nflowCapAgent.git
   cd nflowCapAgent/agent

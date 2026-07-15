@@ -16,6 +16,8 @@ pub struct FlowEntry {
     pub key: FlowKey,
     pub packets: u64,
     pub bytes: u64,
+    /// Bitwise OR of TCP flags seen on all packets (NetFlow tcpFlags / IPFIX tcpControlBits).
+    pub tcp_flags: u8,
     pub first_seen: Instant,
     pub last_seen: Instant,
 }
@@ -35,16 +37,18 @@ impl FlowTable {
         }
     }
 
-    pub fn observe(&mut self, key: FlowKey, packet_bytes: u32, now: Instant) {
+    pub fn observe(&mut self, key: FlowKey, packet_bytes: u32, tcp_flags: u8, now: Instant) {
         let entry = self.flows.entry(key).or_insert_with(|| FlowEntry {
             key,
             packets: 0,
             bytes: 0,
+            tcp_flags: 0,
             first_seen: now,
             last_seen: now,
         });
         entry.packets += 1;
         entry.bytes += u64::from(packet_bytes);
+        entry.tcp_flags |= tcp_flags;
         entry.last_seen = now;
     }
 
