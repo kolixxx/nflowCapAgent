@@ -45,7 +45,7 @@ New-Service `
     -BinaryPathName $binaryPathName `
     -DisplayName "netflowAgent NetFlow Export" `
     -StartupType Automatic `
-    -Description "Exports host network flows as NetFlow v9 to nfcapd collector"
+    -Description "Exports host network flows as IPFIX or NetFlow v9 to nfcapd collector"
 
 Write-Host "Starting service..."
 Start-Service $svcName

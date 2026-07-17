@@ -1,0 +1,269 @@
+= netflowAgent v0.3.1: чистая переустановка и приёмочный тест
+:toc:
+:toclevels: 3
+
+Этот runbook удаляет только netflowAgent и данные двух тестовых источников. Npcap, libpcap, Rust и build tools сохраняются. Команды очистки flow-данных необратимы.
+
+== Что исправлено в v0.3.1
+
+* IPFIX использует IANA Information Elements для адресов, портов и интерфейсов.
+* IPFIX template ID изменён с ошибочного `258` на `259`, чтобы исключить использование старого cache.
+* Начало и конец flow передаются как Unix milliseconds (IE 152/153), поэтому nfdump должен показывать реальную дату.
+* `tcpControlBits` передаётся как unsigned16 (IE 6); значение — побитовое OR TCP flags всех пакетов flow.
+* Sequence увеличивается на количество Data Records.
+* Sets дополняются до границы 4 байт; большие пачки разбиваются на UDP datagram до 1400 байт.
+
+== Фаза 1. Подготовить артефакты
+
+Windows release:
+
+* `agent/dist/win-x64/netflowAgent.exe`
+* `config.toml`
+* `install-service.ps1`
+* `uninstall-service.ps1`
+
+Проверочный SHA-256 Windows-бинарника, собранного 2026-07-18:
+
+[source,text]
+----
+1D77818B4158759147B4D306D9EE7485B43ACBB2E3BAA74362299643285FDAFE
+----
+
+Linux-бинарник следует собрать на Ubuntu 18.04, чтобы он работал на этой и более новых совместимых системах:
+
+[source,bash]
+----
+cd ~/nflowCapAgent
+git pull
+cd agent
+./scripts/build-linux.sh
+./dist/linux-x64/netflowAgent --version
+sha256sum ./dist/linux-x64/netflowAgent
+----
+
+Ожидаемая версия на обеих ОС:
+
+[source,text]
+----
+netflowAgent 0.3.1
+----
+
+== Фаза 2. Полностью удалить старые endpoint-агенты
+
+=== Windows
+
+PowerShell от администратора. Если на VM находится старый uninstall-скрипт без `-PurgeFiles`, используйте ручной fallback:
+
+[source,powershell]
+----
+cd C:\netflowAgent
+.\uninstall-service.ps1
+Set-Location C:\
+Remove-Item C:\netflowAgent -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item C:\ProgramData\netflowAgent -Recurse -Force -ErrorAction SilentlyContinue
+
+Get-Service netflowAgent -ErrorAction SilentlyContinue
+Test-Path C:\netflowAgent
+Test-Path C:\ProgramData\netflowAgent
+----
+
+Новый скрипт v0.3.1 выполняет то же одной командой:
+
+[source,powershell]
+----
+.\uninstall-service.ps1 -PurgeFiles
+----
+
+Критерий: службы нет, оба `Test-Path` возвращают `False`. Если служба зависла в `marked for deletion`, перезагрузите Windows и повторите удаление каталогов.
+
+=== Linux
+
+Если на VM старый скрипт:
+
+[source,bash]
+----
+cd ~/nflowCapAgent/agent/dist/linux-x64
+sudo ./uninstall-linux.sh
+sudo rm -rf -- /opt/netflowAgent /etc/netflowAgent /var/log/netflowAgent
+sudo systemctl daemon-reload
+sudo systemctl reset-failed netflowAgent 2>/dev/null || true
+----
+
+Новый скрипт v0.3.1:
+
+[source,bash]
+----
+sudo ./uninstall-linux.sh --purge
+----
+
+Проверка:
+
+[source,bash]
+----
+systemctl status netflowAgent
+test ! -e /opt/netflowAgent && echo "/opt removed"
+test ! -e /etc/netflowAgent && echo "/etc config removed"
+test ! -e /var/log/netflowAgent && echo "logs removed"
+----
+
+Критерий: unit не найден, три каталога отсутствуют.
+
+== Фаза 3. Сбросить данные коллектора
+
+Сначала endpoint-агенты должны быть остановлены/удалены. На коллекторе:
+
+[source,bash]
+----
+cd ~/nfsen-ng
+docker compose exec nfsen env | grep NFSEN_SOURCES
+----
+
+Продолжайте только если список содержит тестовые `win-pc01` и `ubuntu-pc01` и удаление их истории подтверждено.
+
+[source,bash]
+----
+sudo systemctl stop nfcapd-win-pc01.service nfcapd-ubuntu-pc01.service
+cd ~/nfsen-ng
+docker compose down
+
+sudo rm -rf -- \
+  /var/nfdump/profiles-data/live/win-pc01 \
+  /var/nfdump/profiles-data/live/ubuntu-pc01
+sudo mkdir -p \
+  /var/nfdump/profiles-data/live/win-pc01 \
+  /var/nfdump/profiles-data/live/ubuntu-pc01
+
+sudo systemctl start nfcapd-win-pc01.service nfcapd-ubuntu-pc01.service
+docker compose up -d
+----
+
+Проверка:
+
+[source,bash]
+----
+sudo systemctl --no-pager status nfcapd-win-pc01.service nfcapd-ubuntu-pc01.service
+sudo ss -ulnp | grep -E ':9995|:9996'
+docker compose ps
+find /var/nfdump/profiles-data/live/win-pc01 -type f
+find /var/nfdump/profiles-data/live/ubuntu-pc01 -type f
+----
+
+Пока агенты не установлены, завершённых датированных `nfcapd.YYYYMMDDhhmm` быть не должно. Пустой `nfcapd.current.*`, созданный работающим collector, допустим.
+
+== Фаза 4. Установить Windows v0.3.1
+
+. Скопируйте содержимое `agent/dist/win-x64/` в `C:\netflowAgent`.
+. Убедитесь, что `config.toml` содержит:
+
+[source,toml]
+----
+[collector]
+host = "192.168.30.36"
+port = 9995
+
+[export]
+format = "ipfix"
+observation_domain_id = 1
+source_id = 1
+----
+
+. PowerShell от администратора:
+
+[source,powershell]
+----
+cd C:\netflowAgent
+.\netflowAgent.exe --version
+.\netflowAgent.exe --check-config --config .\config.toml
+.\install-service.ps1
+Get-Service netflowAgent
+Get-Content C:\ProgramData\netflowAgent\agent.log -Tail 30
+----
+
+Критерий: версия `0.3.1`, служба `Running`, в логе `export=ipfix` и `IPFIX exporter ready`.
+
+== Фаза 5. Установить Linux v0.3.1
+
+В каталоге собранного `dist/linux-x64` установите config:
+
+[source,toml]
+----
+[collector]
+host = "192.168.30.36"
+port = 9996
+
+[export]
+format = "ipfix"
+observation_domain_id = 1
+source_id = 2
+----
+
+Затем:
+
+[source,bash]
+----
+cd ~/nflowCapAgent/agent/dist/linux-x64
+./netflowAgent --version
+./netflowAgent --check-config --config config.toml
+sudo ./install-linux.sh
+sudo systemctl --no-pager status netflowAgent
+sudo tail -30 /var/log/netflowAgent/agent.log
+----
+
+Критерий: версия `0.3.1`, служба `active (running)`, в логе `export=ipfix` и `IPFIX exporter ready`.
+
+== Фаза 6. Проверить IPFIX и TCP flags
+
+Проверяйте endpoint по одному, чтобы результат был однозначным.
+
+На Windows:
+
+[source,powershell]
+----
+curl.exe -4 -I https://example.com
+Start-Sleep 20
+----
+
+На Linux:
+
+[source,bash]
+----
+curl -4 -I https://example.com
+sleep 20
+----
+
+После ротации nfcapd найдите свежие завершённые файлы:
+
+[source,bash]
+----
+find /var/nfdump/profiles-data/live/win-pc01 \
+  -type f -name 'nfcapd.20*' -printf '%T@ %p\n' | sort -nr | head -3
+find /var/nfdump/profiles-data/live/ubuntu-pc01 \
+  -type f -name 'nfcapd.20*' -printf '%T@ %p\n' | sort -nr | head -3
+----
+
+Читайте конкретный свежий файл:
+
+[source,bash]
+----
+nfdump -r /полный/путь/к/свежему/nfcapd.YYYYMMDDhhmm \
+  -o extended 'proto tcp and port 443'
+----
+
+Приёмочные критерии:
+
+* дата соответствует текущей дате, не `1970-01-01`;
+* адрес endpoint — `192.168.30.16` для Windows или `192.168.30.43` для Linux, а не `0.0.x.x`;
+* порт HTTPS — `443`, второй порт — реальный ephemeral port, а не `0`;
+* колонка Flags содержит комбинации `S`, `A`, `P`, `F` (возможны также `R`, `E`);
+* `nfdump` не сообщает `INVALID`.
+
+Для доказательства формата захватите datagram на коллекторе:
+
+[source,bash]
+----
+sudo tcpdump -i any -nn -s 0 -w /tmp/win-v031-ipfix.pcap 'udp dst port 9995'
+----
+
+Первые два байта UDP payload должны быть `00 0a` (IPFIX Version 10). В декодированном шаблоне ожидаются Template ID `259`, IE `6` tcpControlBits, IE `152` flowStartMilliseconds и IE `153` flowEndMilliseconds.
+
+Только после выполнения всех критериев v0.3.1 считается готовой для Ansible.

@@ -6,7 +6,7 @@ host = "192.168.30.36"
 port = 9995
 
 [export]
-format = "netflow9"      # or "ipfix"
+format = "ipfix"         # recommended; "netflow9" is also supported
 observation_domain_id = 1
 source_id = 1
 

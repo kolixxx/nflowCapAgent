@@ -90,6 +90,7 @@ chmod +x scripts/build-linux.sh scripts/install-linux.sh scripts/uninstall-linux
 [source,bash]
 ----
 cd dist/linux-x64
+./netflowAgent --version
 sudo ./netflowAgent --list-devices
 nano config.toml
 ./netflowAgent --check-config --config config.toml
@@ -116,13 +117,30 @@ sudo tail -f /var/log/netflowAgent/agent.log
 
 Ожидается: `exporting expired flows`, `dest=192.168.30.36:9996`.
 
-=== 6. Удаление службы
+=== 6. Удаление
+
+Удалить только службу, сохранив бинарник, config и лог:
 
 [source,bash]
 ----
 cd dist/linux-x64
 sudo ./uninstall-linux.sh
 ----
+
+Для чистой переустановки удалить службу и все файлы, принадлежащие агенту:
+
+[source,bash]
+----
+cd dist/linux-x64
+sudo ./uninstall-linux.sh --purge
+
+systemctl status netflowAgent
+test ! -e /opt/netflowAgent && echo "/opt removed"
+test ! -e /etc/netflowAgent && echo "/etc config removed"
+test ! -e /var/log/netflowAgent && echo "logs removed"
+----
+
+Ожидается: systemd сообщает, что unit `netflowAgent` не найден, а три проверки печатают `removed`. `libpcap`, Rust и build tools намеренно сохраняются как общие системные зависимости.
 
 [[linux-interface-auto]]
 == config.toml и `interface = auto`
@@ -134,7 +152,7 @@ host = "192.168.30.36"
 port = 9996
 
 [export]
-format = "netflow9"
+format = "ipfix"
 observation_domain_id = 1
 source_id = 2
 
@@ -220,6 +238,7 @@ Ctrl+C для остановки. Для захвата нужен root (или 
 ----
 sudo journalctl -u netflowAgent -f
 sudo tail -f /var/log/netflowAgent/agent.log
+sudo /opt/netflowAgent/netflowAgent --version
 ----
 
 === На коллекторе
@@ -227,9 +246,12 @@ sudo tail -f /var/log/netflowAgent/agent.log
 [source,bash]
 ----
 find /var/nfdump/profiles-data/live/ubuntu-pc01 -name "nfcapd.*" | tail -3
-nfdump -R /var/nfdump/profiles-data/live/ubuntu-pc01 -c 5 -o extended
-nfdump -R /var/nfdump/profiles-data/live/ubuntu-pc01 -o extended 2>/dev/null | grep -c INVALID
+# После ротации укажите самый свежий завершённый файл:
+nfdump -r /var/nfdump/profiles-data/live/ubuntu-pc01/YYYY/MM/DD/nfcapd.YYYYMMDDhhmm \
+  -o extended 'proto tcp and port 443'
 ----
+
+В свежем файле должны быть текущая дата, реальные IP/порты и TCP flags (`S`, `A`, `P`, `F`). Не используйте `-R` по всей истории для приёмочного теста: туда попадут старые записи предыдущих версий.
 
 === В nfsen-ng
 
@@ -289,4 +311,4 @@ Graphs → source `ubuntu-pc01`. Задержка RRD ~5 мин.
 
 == Версия
 
-**v0.3.0** — NetFlow v9 / IPFIX + TCP flags. Откат: тег `v0.2.2`.
+**v0.3.1** — исправленный IPFIX template 259, абсолютное время и TCP flags. Версию v0.3.0 не использовать для IPFIX: её template 258 содержит неверные IE. Откат на NetFlow v9 без flags: тег `v0.2.2`.

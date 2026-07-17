@@ -16,7 +16,11 @@ use tracing::info;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 #[derive(Parser, Debug)]
-#[command(name = "netflowAgent", about = "Host NetFlow export agent")]
+#[command(
+    name = "netflowAgent",
+    version,
+    about = "Host NetFlow/IPFIX export agent"
+)]
 struct Cli {
     /// Path to config.toml
     #[arg(short, long, default_value = "config.toml")]

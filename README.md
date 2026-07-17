@@ -1,6 +1,6 @@
 # nflowCapAgent
 
-Host NetFlow export agent for **Windows** and **Linux**. Captures traffic on a local interface and sends **NetFlow v9** to an **nfcapd** collector (e.g. [nfsen-ng](https://github.com/mbolli/nfsen-ng)).
+Host NetFlow/IPFIX export agent for **Windows** and **Linux**. Captures traffic on a local interface and sends **IPFIX** (recommended) or NetFlow v9 to an **nfcapd** collector (e.g. [nfsen-ng](https://github.com/mbolli/nfsen-ng)).
 
 ## Quick start (Windows, Stage 1)
 
@@ -18,6 +18,9 @@ Host NetFlow export agent for **Windows** and **Linux**. Captures traffic on a l
 ## Documentation
 
 - [Agent design & test plan](docs/netflowAgent-design.adoc)
+- [Windows agent install](docs/netflowAgent-install-windows.adoc)
+- [Linux agent install](docs/netflowAgent-install-linux.adoc)
+- [Clean reinstall and v0.3.1 acceptance test](docs/clean-reinstall-v0.3.1.adoc)
 - [nfsen-ng collector install (Ubuntu 24.04)](docs/nfsen-ng-install-ubuntu2404.adoc)
 
 ## Build from source (Windows)

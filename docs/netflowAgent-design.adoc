@@ -45,9 +45,14 @@
 | Служба + ps1
 | тег `v0.2.0`
 
-| **v0.3.0**
+| **v0.3.1**
 | **текущая** (IPFIX + TCP flags)
-| `format = "ipfix"` или `netflow9` (template 258); оба endpoint
+| Исправленный IPFIX template 259; абсолютное время; оба endpoint
+| до приёмочного теста — ветка `main`
+
+| **v0.3.0**
+| ошибочная для IPFIX
+| IPFIX template 258: неверные IE и относительное время; NetFlow v9 не затронут
 | тег `v0.3.0`
 
 | **v0.2.2**
@@ -64,10 +69,10 @@
 
 [IMPORTANT]
 ====
-*v0.3.0* — IPFIX + TCP flags на **обоих** endpoint. Откат без flags: тег `v0.2.2`.
+*v0.3.1* — исправленный IPFIX + TCP flags на **обоих** endpoint. Откат без flags: тег `v0.2.2`.
 
 * `format = "netflow9"` — NetFlow v9 template 258 (+ TCP_FLAGS)
-* `format = "ipfix"` — IPFIX (nfcapd принимает оба)
+* `format = "ipfix"` — IPFIX template 259 (IANA IE, абсолютные timestamps; nfcapd принимает оба формата)
 
 Windows: link:netflowAgent-install-windows.adoc[install-windows]. Linux: link:netflowAgent-install-linux.adoc[install-linux].
 ====
@@ -76,8 +81,8 @@ Windows: link:netflowAgent-install-windows.adoc[install-windows]. Linux: link:ne
 
 [source,bash]
 ----
-# v0.3.0 (IPFIX + TCP flags)
-git clone --depth 1 --branch v0.3.0 https://github.com/kolixxx/nflowCapAgent.git
+# v0.3.1 до создания проверенного тега
+git clone https://github.com/kolixxx/nflowCapAgent.git
 
 # откат v0.2.2 (NetFlow v9 без flags)
 git clone --depth 1 --branch v0.2.2 https://github.com/kolixxx/nflowCapAgent.git
@@ -536,7 +541,7 @@ Get-Service netflowAgent
 Get-Content C:\ProgramData\netflowAgent\agent.log -Tail 20
 ----
 
-. Удаление службы: `.\scripts\uninstall-service.ps1` или `.\netflowAgent.exe --uninstall-service`
+. Удаление службы: `C:\netflowAgent\uninstall-service.ps1` или `.\netflowAgent.exe --uninstall-service`
 
 ==== 2b. Linux endpoint — v0.2.2 ✅ принят (2026-07-06)
 
@@ -550,11 +555,12 @@ Get-Content C:\ProgramData\netflowAgent\agent.log -Tail 20
 *Вместе с Windows v0.2.0 → релиз <<versions,v0.2.2>> (NetFlow v9 на обоих endpoint).*
 
 [[этап-3]]
-=== Этап 3 — IPFIX и TCP flags — v0.3.0
+=== Этап 3 — IPFIX и TCP flags — v0.3.1
 
 * [x] **TCP flags** — cumulative OR по пакетам TCP (NetFlow IE 6 / IPFIX tcpControlBits)
 * [x] **IPFIX export** — `format = "ipfix"` в config
 * [x] NetFlow v9 template **258** (+ TCP_FLAGS)
+* [x] IPFIX template **259**: IANA IE, `flowStart/EndMilliseconds`, padding, sequence по Data Records
 * [ ] Тест на обоих endpoint + nfdump/nfsen-ng
 * [ ] IPv6 flows (далее)
 * [ ] Фильтры захвата в config
@@ -562,7 +568,7 @@ Get-Content C:\ProgramData\netflowAgent\agent.log -Tail 20
 
 ==== TCP flags
 
-Агент **до v0.3.0 не собирал** TCP flags — только 5-tuple, байты и пакеты.
+Агент **до v0.3.0 не собирал** TCP flags — только 5-tuple, байты и пакеты. В v0.3.0 flags появились, но IPFIX template был ошибочным; для IPFIX использовать v0.3.1+.
 
 С **v0.3.0**: для каждого TCP-пакета читается байт flags (offset 13 заголовка TCP); в flow — **побитовое OR** всех пакетов (стандарт NetFlow/nfdump: `flags` в extended output).
 

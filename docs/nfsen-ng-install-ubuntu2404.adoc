@@ -543,6 +543,83 @@ docker compose restart nfsen
 nfdump -R /var/nfdump/profiles-data/live/win-pc01/2026/07/03/nfcapd.202607032250:2026/07/03/nfcapd.202607032300 -c 10
 ----
 
+[[clean-two-sources]]
+=== Полный сброс данных двух тестовых источников
+
+[WARNING]
+====
+Следующие команды необратимо удаляют raw flow-файлы `win-pc01` и `ubuntu-pc01`, а также построенные из них графики/RRD. Настройки nfcapd, Docker и nfsen-ng сохраняются. Перед выполнением остановите оба endpoint-агента, чтобы во время очистки не приходили новые datagram.
+====
+
+На Windows endpoint (PowerShell от администратора):
+
+[source,powershell]
+----
+Stop-Service netflowAgent
+----
+
+На Linux endpoint:
+
+[source,bash]
+----
+sudo systemctl stop netflowAgent
+----
+
+На коллекторе сначала убедитесь, что nfsen-ng настроен только на эти два тестовых источника:
+
+[source,bash]
+----
+cd ~/nfsen-ng
+docker compose exec nfsen env | grep NFSEN_SOURCES
+----
+
+Остановите приём и удалите контейнер nfsen-ng вместе с его внутренним RRD cache. `docker compose down` без `-v` не удаляет host-каталог `/var/nfdump/profiles-data`:
+
+[source,bash]
+----
+sudo systemctl stop nfcapd-win-pc01.service nfcapd-ubuntu-pc01.service
+cd ~/nfsen-ng
+docker compose down
+----
+
+Необязательная резервная копия перед удалением:
+
+[source,bash]
+----
+sudo tar -C /var/nfdump/profiles-data/live \
+  -czf "$HOME/netflow-before-reset-$(date +%Y%m%d-%H%M%S).tar.gz" \
+  win-pc01 ubuntu-pc01
+----
+
+Удалите и пересоздайте только два source-каталога:
+
+[source,bash]
+----
+sudo rm -rf -- \
+  /var/nfdump/profiles-data/live/win-pc01 \
+  /var/nfdump/profiles-data/live/ubuntu-pc01
+sudo mkdir -p \
+  /var/nfdump/profiles-data/live/win-pc01 \
+  /var/nfdump/profiles-data/live/ubuntu-pc01
+
+sudo systemctl start nfcapd-win-pc01.service nfcapd-ubuntu-pc01.service
+cd ~/nfsen-ng
+docker compose up -d
+----
+
+Контроль чистого состояния:
+
+[source,bash]
+----
+find /var/nfdump/profiles-data/live/win-pc01 -type f
+find /var/nfdump/profiles-data/live/ubuntu-pc01 -type f
+sudo systemctl --no-pager status nfcapd-win-pc01.service nfcapd-ubuntu-pc01.service
+docker compose ps
+sudo ss -ulnp | grep -E ':9995|:9996'
+----
+
+До повторной установки endpoint-агентов первые две команды не должны показывать `nfcapd.*`. После появления новых flow в UI выполните *Admin* → *Force Rescan* → *Trigger Import* или дождитесь автоимпорта.
+
 == Шаг 7. Автозапуск nfcapd (systemd)
 
 Для двух источников создайте два unit-файла.

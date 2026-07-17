@@ -1,6 +1,6 @@
-netflowAgent v0.3.0 — Linux endpoint (ubuntu-pc01)
+netflowAgent v0.3.1 — Linux endpoint (ubuntu-pc01)
 
-Features: NetFlow v9 (template 258) or IPFIX, TCP flags in flows.
+Features: NetFlow v9 (template 258) or IPFIX (template 259), TCP flags in flows.
 
 Build on the target host (Ubuntu 18.04+):
 
