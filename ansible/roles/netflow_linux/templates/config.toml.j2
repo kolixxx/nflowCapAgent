@@ -1,0 +1,20 @@
+[collector]
+host = {{ collector_host | to_json }}
+port = {{ collector_port }}
+
+[export]
+format = {{ export_format | to_json }}
+observation_domain_id = {{ observation_domain_id }}
+source_id = {{ source_id }}
+
+[capture]
+interface = {{ capture_interface | to_json }}
+promiscuous = false
+
+[flow]
+active_timeout_secs = {{ active_timeout_secs }}
+inactive_timeout_secs = {{ inactive_timeout_secs }}
+
+[logging]
+level = "info"
+file = "/var/log/netflowAgent/agent.log"

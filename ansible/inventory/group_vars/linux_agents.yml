@@ -1,0 +1,9 @@
+---
+ansible_user: kolix
+ansible_become: true
+ansible_python_interpreter: /usr/bin/python3
+collector_port: 9996
+source_id: 2
+
+linux_agent_binary: "{{ playbook_dir }}/../../agent/dist/linux-x64/netflowAgent"
+linux_agent_sha256: "5239219167eaa1de854aa3a38234cc819fe9eab9abdd06559a0a7e7488d96ce9"

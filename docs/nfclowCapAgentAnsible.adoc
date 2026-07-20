@@ -1,0 +1,169 @@
+= netflowAgent: установка через Ansible
+:toc:
+:toclevels: 2
+
+Ansible запускается на отдельном Ubuntu control host и устанавливает готовые v0.3.1 binaries на Windows и Ubuntu endpoint. Ansible-хост и IPFIX-коллектор — независимые роли: агент продолжает отправлять flows на `collector_host = 192.168.30.36`. Rust на endpoint-машинах не требуется.
+
+Для текущего лабораторного теста роль Ansible control host временно выполняет сам коллектор. Позже тот же репозиторий и команды переносятся на отдельную Ansible-машину без изменения playbook.
+
+== Структура
+
+[source,text]
+----
+ansible/
+  ansible.cfg
+  requirements.yml
+  inventory/
+  playbooks/deploy.yml
+  roles/netflow_linux/
+  roles/netflow_windows/
+  bootstrap/
+----
+
+Артефакты берутся из этого же репозитория:
+
+[source,text]
+----
+agent/dist/win-x64/netflowAgent.exe
+agent/dist/linux-x64/netflowAgent
+----
+
+== 1. Подготовка новых VM
+
+Ansible не может подключиться к машине, где ещё нет удалённого доступа.
+
+* Ubuntu: через консоль VM, cloud-init или шаблон один раз запустить `sudo ansible/bootstrap/bootstrap-linux.sh kolix`. Скрипт создаст пользователя при необходимости, добавит его в sudo и включит SSH. При передаче `ANSIBLE_SSH_PUBLIC_KEY` также создаются `authorized_keys` и NOPASSWD sudo; иначе задайте пользователю пароль до выхода из консоли.
+* Windows: через консоль VM, GPO или шаблон один раз запустить PowerShell от администратора: `.\bootstrap-winrm.ps1 -AnsibleController <IP-Ansible-host>`.
+* Npcap на Windows устанавливается отдельно с учётом его лицензии. Ansible проверяет наличие службы `npcap` и останавливает play с понятной ошибкой, если Npcap отсутствует.
+
+В лаборатории WinRM использует HTTPS/5986 с self-signed сертификатом. В production замените его доверенным сертификатом и установите `ansible_winrm_server_cert_validation: validate`.
+
+Для существующих тестовых VM достаточно SSH на Linux и WinRM HTTPS на Windows. В текущем тесте в `-AnsibleController` указывается IP коллектора `192.168.30.36`; после переноса — IP отдельного Ansible-хоста.
+
+== 2. Установка на Ansible control host
+
+Рекомендуемая ОС control host — Ubuntu 24.04. Он должен иметь сетевой доступ к Linux endpoint по SSH/22, к Windows endpoint по WinRM HTTPS/5986 и к Git-репозиторию. Доступ endpoint к Ansible-хосту не требуется.
+
+[source,bash]
+----
+sudo apt update
+sudo apt install -y git python3.12 python3.12-venv sshpass
+
+python3.12 --version
+python3.12 -m venv ~/ansible-venv
+source ~/ansible-venv/bin/activate
+pip install --upgrade pip
+# ansible-core 2.16 — последняя ветка с поддержкой Python 3.6 на Ubuntu 18.04:
+pip install "ansible-core>=2.16,<2.17" pywinrm
+
+git clone https://github.com/kolixxx/nflowCapAgent.git ~/nflowCapAgent
+cd ~/nflowCapAgent/ansible
+ansible-galaxy collection install -r requirements.yml
+----
+
+[NOTE]
+====
+`ansible-core 2.16` уже EOL, но это последняя версия, которая умеет управлять штатным Python 3.6 на Ubuntu 18.04. После обновления endpoint до поддерживаемой Ubuntu следует перейти на актуальный ansible-core.
+====
+
+== 3. Inventory
+
+Хосты находятся в `ansible/inventory/hosts.yml`:
+
+[source,yaml]
+----
+linux_agents:
+  hosts:
+    ubuntu-pc01:
+      ansible_host: 192.168.30.43
+      observation_domain_id: 2
+
+windows_agents:
+  hosts:
+    win-pc01:
+      ansible_host: 192.168.30.16
+      observation_domain_id: 1
+----
+
+Для новых машин добавляйте записи в соответствующую группу. `observation_domain_id` рекомендуется делать уникальным для каждого exporter.
+
+`capture_interface` задавайте явно для каждого хоста: `ens160` на тестовом Ubuntu и полный `\Device\NPF_{GUID}` на Windows. Значение берётся из `netflowAgent --list-devices`; не полагайтесь на `auto` на многосетевых машинах.
+
+Публичные настройки находятся в `inventory/group_vars/`. Пароли в Git не сохраняются.
+
+== 4. Проверка подключения
+
+С Ansible control host сначала один раз подтвердите SSH host key:
+
+[source,bash]
+----
+ssh kolix@192.168.30.43
+----
+
+Затем:
+
+[source,bash]
+----
+cd ~/nflowCapAgent/ansible
+source ~/ansible-venv/bin/activate
+
+ansible linux_agents -m ansible.builtin.ping --ask-pass
+ansible windows_agents -m ansible.windows.win_ping --ask-pass
+----
+
+`ansible ping` — не ICMP ping: он проверяет реальное SSH/WinRM-подключение и выполнение модуля.
+
+== 5. Установка агентов
+
+Linux:
+
+[source,bash]
+----
+ansible-playbook playbooks/deploy.yml \
+  --limit linux_agents \
+  --ask-pass \
+  --ask-become-pass
+----
+
+Windows:
+
+[source,bash]
+----
+ansible-playbook playbooks/deploy.yml \
+  --limit windows_agents \
+  --ask-pass
+----
+
+Playbook:
+
+* проверяет SHA-256 binaries;
+* Linux: устанавливает `libpcap0.8`, binary, config и systemd unit;
+* Windows: проверяет Npcap, копирует binary/config и создаёт службу;
+* включает автозапуск, запускает агент и проверяет версию `0.3.1`.
+* через несколько секунд повторно проверяет, что служба не завершилась; Windows-службе задаются recovery/restart actions.
+
+Повторный запуск безопасен: Ansible меняет только отличающееся состояние.
+
+== 6. Проверка результата
+
+[source,bash]
+----
+ansible linux_agents -b -m ansible.builtin.command \
+  -a "systemctl is-active netflowAgent" --ask-pass --ask-become-pass
+
+ansible windows_agents -m ansible.windows.win_service_info \
+  -a "name=netflowAgent" --ask-pass
+----
+
+На коллекторе после ротации проверяйте конкретные свежие файлы:
+
+[source,bash]
+----
+nfdump -r /var/nfdump/profiles-data/live/win-pc01/YYYY/MM/DD/nfcapd.YYYYMMDDhhmm \
+  -o extended 'proto tcp'
+
+nfdump -r /var/nfdump/profiles-data/live/ubuntu-pc01/YYYY/MM/DD/nfcapd.YYYYMMDDhhmm \
+  -o extended 'proto tcp'
+----
+
+Критерии: текущая дата, реальные IP/порты, непустые TCP flags и отсутствие записей `1970-01-01`/`0.0.x.x`.

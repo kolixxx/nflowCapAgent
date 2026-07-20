@@ -20,6 +20,8 @@ Host NetFlow/IPFIX export agent for **Windows** and **Linux**. Captures traffic 
 - [Agent design & test plan](docs/netflowAgent-design.adoc)
 - [Windows agent install](docs/netflowAgent-install-windows.adoc)
 - [Linux agent install](docs/netflowAgent-install-linux.adoc)
+- [How TCP flags are collected](docs/netflowAgent-tcp-flags.adoc)
+- [Ansible deployment](docs/nfclowCapAgentAnsible.adoc)
 - [Clean reinstall and v0.3.1 acceptance test](docs/clean-reinstall-v0.3.1.adoc)
 - [nfsen-ng collector install (Ubuntu 24.04)](docs/nfsen-ng-install-ubuntu2404.adoc)
 

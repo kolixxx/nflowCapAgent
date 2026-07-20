@@ -1,0 +1,114 @@
+---
+- name: Check Windows artifact on Ansible host
+  ansible.builtin.stat:
+    path: "{{ windows_agent_binary }}"
+    checksum_algorithm: sha256
+  delegate_to: localhost
+  register: windows_artifact
+
+- name: Validate Windows artifact
+  ansible.builtin.assert:
+    that:
+      - windows_artifact.stat.exists
+      - windows_artifact.stat.checksum == windows_agent_sha256
+    fail_msg: "Missing or invalid Windows artifact: {{ windows_agent_binary }}"
+
+- name: Check Npcap service
+  ansible.windows.win_service_info:
+    name: npcap
+  register: npcap_service
+
+- name: Require Npcap
+  ansible.builtin.assert:
+    that:
+      - npcap_service.services | length > 0
+    fail_msg: "Npcap is not installed. Install a licensed Npcap package, then rerun Ansible."
+
+- name: Inspect installed Windows agent binary
+  ansible.windows.win_stat:
+    path: C:\netflowAgent\netflowAgent.exe
+    checksum_algorithm: sha256
+  register: installed_windows_agent
+
+- name: Inspect existing Windows agent service
+  ansible.windows.win_service_info:
+    name: netflowAgent
+  register: existing_windows_service
+
+- name: Stop Windows agent before binary upgrade
+  ansible.windows.win_service:
+    name: netflowAgent
+    state: stopped
+  when:
+    - installed_windows_agent.stat.exists
+    - installed_windows_agent.stat.checksum != windows_agent_sha256
+    - existing_windows_service.services | length > 0
+
+- name: Create Windows agent directories
+  ansible.windows.win_file:
+    path: "{{ item }}"
+    state: directory
+  loop:
+    - C:\netflowAgent
+    - C:\ProgramData\netflowAgent
+
+- name: Install Windows agent binary
+  ansible.windows.win_copy:
+    src: "{{ windows_agent_binary }}"
+    dest: C:\netflowAgent\netflowAgent.exe
+  notify: Restart Windows agent
+
+- name: Install Windows configuration
+  ansible.windows.win_template:
+    src: config.toml.j2
+    dest: C:\netflowAgent\config.toml
+  notify: Restart Windows agent
+
+- name: Install and start Windows service
+  ansible.windows.win_service:
+    name: netflowAgent
+    display_name: netflowAgent NetFlow Export
+    description: Exports host network flows as IPFIX to nfcapd collector
+    path: '"C:\netflowAgent\netflowAgent.exe" --run-as-service --config "C:\netflowAgent\config.toml"'
+    start_mode: auto
+    state: started
+    failure_reset_period_sec: 86400
+    failure_actions_on_non_crash_failure: true
+    failure_actions:
+      - type: restart
+        delay_ms: 5000
+      - type: restart
+        delay_ms: 10000
+      - type: restart
+        delay_ms: 30000
+  notify: Restart Windows agent
+
+- name: Apply pending Windows restarts
+  ansible.builtin.meta: flush_handlers
+
+- name: Read installed Windows agent version
+  ansible.windows.win_command: C:\netflowAgent\netflowAgent.exe --version
+  changed_when: false
+  register: windows_agent_version
+
+- name: Verify installed Windows agent version
+  ansible.builtin.assert:
+    that:
+      - agent_version in windows_agent_version.stdout
+    fail_msg: "Unexpected Windows agent version: {{ windows_agent_version.stdout }}"
+
+- name: Wait for Windows agent startup
+  ansible.builtin.pause:
+    seconds: 3
+
+- name: Read Windows agent service state
+  ansible.windows.win_service_info:
+    name: netflowAgent
+  register: running_windows_service
+
+- name: Verify Windows agent remains running
+  ansible.builtin.assert:
+    that:
+      - running_windows_service.services | length == 1
+      - running_windows_service.services[0].state == "started"
+    fail_msg: "netflowAgent did not remain running; inspect C:\\ProgramData\\netflowAgent\\agent.log"

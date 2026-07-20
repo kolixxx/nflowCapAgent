@@ -1,0 +1,92 @@
+---
+- name: Check Linux artifact on Ansible host
+  ansible.builtin.stat:
+    path: "{{ linux_agent_binary }}"
+    checksum_algorithm: sha256
+  delegate_to: localhost
+  become: false
+  register: linux_artifact
+
+- name: Validate Linux artifact
+  ansible.builtin.assert:
+    that:
+      - linux_artifact.stat.exists
+      - linux_artifact.stat.checksum == linux_agent_sha256
+    fail_msg: "Missing or invalid Linux artifact: {{ linux_agent_binary }}"
+
+- name: Install libpcap runtime
+  ansible.builtin.apt:
+    name: libpcap0.8
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create agent directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: /opt/netflowAgent, mode: "0755" }
+    - { path: /etc/netflowAgent, mode: "0755" }
+    - { path: /var/log/netflowAgent, mode: "0755" }
+
+- name: Install Linux agent binary
+  ansible.builtin.copy:
+    src: "{{ linux_agent_binary }}"
+    dest: /opt/netflowAgent/netflowAgent
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart Linux agent
+
+- name: Install Linux configuration
+  ansible.builtin.template:
+    src: config.toml.j2
+    dest: /etc/netflowAgent/config.toml
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Linux agent
+
+- name: Install systemd unit
+  ansible.builtin.template:
+    src: netflowAgent.service.j2
+    dest: /etc/systemd/system/netflowAgent.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Linux agent
+
+- name: Enable and start Linux agent
+  ansible.builtin.systemd:
+    name: netflowAgent
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Apply pending Linux restarts
+  ansible.builtin.meta: flush_handlers
+
+- name: Read installed Linux agent version
+  ansible.builtin.command: /opt/netflowAgent/netflowAgent --version
+  changed_when: false
+  register: linux_agent_version
+
+- name: Verify installed Linux agent version
+  ansible.builtin.assert:
+    that:
+      - agent_version in linux_agent_version.stdout
+    fail_msg: "Unexpected Linux agent version: {{ linux_agent_version.stdout }}"
+
+- name: Wait for Linux agent startup
+  ansible.builtin.pause:
+    seconds: 3
+
+- name: Verify Linux agent remains running
+  ansible.builtin.command: systemctl is-active netflowAgent
+  changed_when: false
+  register: linux_agent_state
+  failed_when: linux_agent_state.stdout != "active"

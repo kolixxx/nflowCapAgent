@@ -1,0 +1,14 @@
+---
+ansible_user: Administrator
+ansible_connection: winrm
+ansible_port: 5986
+ansible_winrm_scheme: https
+ansible_winrm_transport: ntlm
+# Self-signed certificate is acceptable only in this isolated lab.
+ansible_winrm_server_cert_validation: ignore
+
+collector_port: 9995
+source_id: 1
+
+windows_agent_binary: "{{ playbook_dir }}/../../agent/dist/win-x64/netflowAgent.exe"
+windows_agent_sha256: "1d77818b4158759147b4d306d9ee7485b43acbb2e3baa74362299643285fdafe"

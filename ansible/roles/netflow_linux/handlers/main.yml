@@ -1,0 +1,7 @@
+---
+- name: Restart Linux agent
+  ansible.builtin.systemd:
+    name: netflowAgent
+    enabled: true
+    state: restarted
+    daemon_reload: true

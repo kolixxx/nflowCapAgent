@@ -1,0 +1,12 @@
+---
+- name: Deploy netflowAgent to Linux endpoints
+  hosts: linux_agents
+  gather_facts: true
+  roles:
+    - netflow_linux
+
+- name: Deploy netflowAgent to Windows endpoints
+  hosts: windows_agents
+  gather_facts: false
+  roles:
+    - netflow_windows

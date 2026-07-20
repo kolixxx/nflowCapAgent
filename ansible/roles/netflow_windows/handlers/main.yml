@@ -1,0 +1,6 @@
+---
+- name: Restart Windows agent
+  ansible.windows.win_service:
+    name: netflowAgent
+    start_mode: auto
+    state: restarted
