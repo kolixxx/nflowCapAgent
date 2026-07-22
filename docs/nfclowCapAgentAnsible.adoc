@@ -83,9 +83,7 @@ pip install --upgrade pip
 # ansible-core 2.16 — последняя ветка с поддержкой Python 3.6 на Ubuntu 18.04:
 pip install "ansible-core>=2.16,<2.17" pywinrm
 
-# Пока Ansible ещё не объединён с main:
-git clone --branch feature/ansible-deployment --single-branch \
-  https://github.com/kolixxx/nflowCapAgent.git ~/nflowCapAgent
+git clone https://github.com/kolixxx/nflowCapAgent.git ~/nflowCapAgent
 
 cd ~/nflowCapAgent/ansible
 ansible-galaxy collection install -r requirements.yml
@@ -98,8 +96,6 @@ ansible-playbook playbooks/deploy.yml --syntax-check
 [NOTE]
 ====
 `ansible-core 2.16` уже EOL, но это последняя версия, которая умеет управлять штатным Python 3.6 на Ubuntu 18.04. После обновления endpoint до поддерживаемой Ubuntu следует перейти на актуальный ansible-core.
-
-После объединения `feature/ansible-deployment` с `main` клонируйте репозиторий обычным `git clone` без `--branch` и `--single-branch`.
 ====
 
 == 3. Inventory
