@@ -1,10 +1,13 @@
 = netflowAgent: установка через Ansible
 :toc:
 :toclevels: 2
+:revdate: 2026-07-22
 
 Ansible запускается на отдельном Ubuntu control host и устанавливает готовые v0.3.1 binaries на Windows и Ubuntu endpoint. Ansible-хост и IPFIX-коллектор — независимые роли: агент продолжает отправлять flows на `collector_host = 192.168.30.36`. Rust на endpoint-машинах не требуется.
 
 Для текущего лабораторного теста роль Ansible control host временно выполняет сам коллектор. Позже тот же репозиторий и команды переносятся на отдельную Ansible-машину без изменения playbook.
+
+Связанные инструкции: link:clean-reinstall-v0.3.1.adoc[чистая переустановка и приёмка], link:logs-cheatsheet.adoc[логи и диагностика], link:nfsen-ng-install-ubuntu2404.adoc[коллектор nfcapd/nfsen-ng].
 
 == Структура
 
@@ -32,13 +35,37 @@ agent/dist/linux-x64/netflowAgent
 
 Ansible не может подключиться к машине, где ещё нет удалённого доступа.
 
-* Ubuntu: через консоль VM, cloud-init или шаблон один раз запустить `sudo ansible/bootstrap/bootstrap-linux.sh kolix`. Скрипт создаст пользователя при необходимости, добавит его в sudo и включит SSH. При передаче `ANSIBLE_SSH_PUBLIC_KEY` также создаются `authorized_keys` и NOPASSWD sudo; иначе задайте пользователю пароль до выхода из консоли.
+* Ubuntu: сначала поместить `bootstrap-linux.sh` на VM через консоль, cloud-init, ISO/shared folder или шаблон, затем один раз запустить `sudo ./bootstrap-linux.sh kolix`. Скрипт создаст пользователя при необходимости, добавит его в sudo и включит SSH. При передаче `ANSIBLE_SSH_PUBLIC_KEY` также создаются `authorized_keys` и NOPASSWD sudo; иначе задайте пользователю пароль до выхода из консоли.
 * Windows: через консоль VM, GPO или шаблон один раз запустить PowerShell от администратора: `.\bootstrap-winrm.ps1 -AnsibleController <IP-Ansible-host>`.
 * Npcap на Windows устанавливается отдельно с учётом его лицензии. Ansible проверяет наличие службы `npcap` и останавливает play с понятной ошибкой, если Npcap отсутствует.
 
 В лаборатории WinRM использует HTTPS/5986 с self-signed сертификатом. В production замените его доверенным сертификатом и установите `ansible_winrm_server_cert_validation: validate`.
 
 Для существующих тестовых VM достаточно SSH на Linux и WinRM HTTPS на Windows. В текущем тесте в `-AnsibleController` указывается IP коллектора `192.168.30.36`; после переноса — IP отдельного Ansible-хоста.
+
+Если WinRM ещё не работает, bootstrap-файл можно временно раздать с Ansible-хоста. На Ansible-хосте:
+
+[source,bash]
+----
+cd ~/nflowCapAgent/ansible/bootstrap
+python3 -m http.server 8000 --bind <IP-Ansible-host>
+----
+
+На Windows endpoint в PowerShell от администратора:
+
+[source,powershell]
+----
+Invoke-WebRequest `
+  -Uri "http://<IP-Ansible-host>:8000/bootstrap-winrm.ps1" `
+  -OutFile "$env:USERPROFILE\Desktop\bootstrap-winrm.ps1"
+
+Set-ExecutionPolicy -Scope Process Bypass
+& "$env:USERPROFILE\Desktop\bootstrap-winrm.ps1" -AnsibleController "<IP-Ansible-host>"
+
+Get-NetTCPConnection -LocalPort 5986 -State Listen
+----
+
+После скачивания остановите временный HTTP-сервер через `Ctrl+C`. Если между машинами запрещён TCP/8000, перенесите этот единственный файл через консоль VM, shared folder или разрешённый внутренний файловый ресурс.
 
 == 2. Установка на Ansible control host
 
@@ -56,14 +83,23 @@ pip install --upgrade pip
 # ansible-core 2.16 — последняя ветка с поддержкой Python 3.6 на Ubuntu 18.04:
 pip install "ansible-core>=2.16,<2.17" pywinrm
 
-git clone https://github.com/kolixxx/nflowCapAgent.git ~/nflowCapAgent
+# Пока Ansible ещё не объединён с main:
+git clone --branch feature/ansible-deployment --single-branch \
+  https://github.com/kolixxx/nflowCapAgent.git ~/nflowCapAgent
+
 cd ~/nflowCapAgent/ansible
 ansible-galaxy collection install -r requirements.yml
+
+ansible --version
+ansible-inventory --graph
+ansible-playbook playbooks/deploy.yml --syntax-check
 ----
 
 [NOTE]
 ====
 `ansible-core 2.16` уже EOL, но это последняя версия, которая умеет управлять штатным Python 3.6 на Ubuntu 18.04. После обновления endpoint до поддерживаемой Ubuntu следует перейти на актуальный ansible-core.
+
+После объединения `feature/ansible-deployment` с `main` клонируйте репозиторий обычным `git clone` без `--branch` и `--single-branch`.
 ====
 
 == 3. Inventory
@@ -72,17 +108,21 @@ ansible-galaxy collection install -r requirements.yml
 
 [source,yaml]
 ----
-linux_agents:
-  hosts:
-    ubuntu-pc01:
-      ansible_host: 192.168.30.43
-      observation_domain_id: 2
+all:
+  children:
+    linux_agents:
+      hosts:
+        ubuntu-pc01:
+          ansible_host: 192.168.30.43
+          observation_domain_id: 2
+          capture_interface: ens160
 
-windows_agents:
-  hosts:
-    win-pc01:
-      ansible_host: 192.168.30.16
-      observation_domain_id: 1
+    windows_agents:
+      hosts:
+        win-pc01:
+          ansible_host: 192.168.30.16
+          observation_domain_id: 1
+          capture_interface: '\Device\NPF_{GUID}'
 ----
 
 Для новых машин добавляйте записи в соответствующую группу. `observation_domain_id` рекомендуется делать уникальным для каждого exporter.
@@ -90,6 +130,8 @@ windows_agents:
 `capture_interface` задавайте явно для каждого хоста: `ens160` на тестовом Ubuntu и полный `\Device\NPF_{GUID}` на Windows. Значение берётся из `netflowAgent --list-devices`; не полагайтесь на `auto` на многосетевых машинах.
 
 Публичные настройки находятся в `inventory/group_vars/`. Пароли в Git не сохраняются.
+
+Основные значения: `collector_host = 192.168.30.36`, Windows UDP/9995 и `source_id = 1`, Linux UDP/9996 и `source_id = 2`, формат `ipfix`, active/inactive timeout 60/15 секунд.
 
 == 4. Проверка подключения
 
@@ -107,13 +149,83 @@ ssh kolix@192.168.30.43
 cd ~/nflowCapAgent/ansible
 source ~/ansible-venv/bin/activate
 
-ansible linux_agents -m ansible.builtin.ping --ask-pass
+ansible linux_agents -m ansible.builtin.ping \
+  --ask-pass --ask-become-pass
+
 ansible windows_agents -m ansible.windows.win_ping --ask-pass
 ----
 
 `ansible ping` — не ICMP ping: он проверяет реальное SSH/WinRM-подключение и выполнение модуля.
 
-== 5. Установка агентов
+Группа называется `windows_agents` с подчёркиванием. Сообщение `No hosts matched` обычно означает опечатку в имени группы. Надпись `SSH password` перед Windows-командой — стандартный текст Ansible; фактически этот пароль используется для WinRM.
+
+В разовых Windows ad-hoc командах используйте пути с `/`, например `path=C:/netflowAgent/config.toml`: так Bash не преобразует `\n` и другие сочетания. YAML в роли уже содержит корректные Windows-пути и этой проблемы не имеет.
+
+== 5. Необязательная очистка старой установки
+
+Этот раздел нужен только для приёмочного теста «с нуля». При обычном обновлении очистка не требуется: роль безопасно заменяет изменившиеся файлы.
+
+[WARNING]
+====
+Команды ниже удаляют службу, конфигурацию и логи агента. `libpcap`, Npcap, Rust, SSH и WinRM сохраняются.
+====
+
+Linux:
+
+[source,bash]
+----
+ansible linux_agents -b -m ansible.builtin.shell \
+  -a 'systemctl disable --now netflowAgent 2>/dev/null || true; rm -f /etc/systemd/system/netflowAgent.service; systemctl daemon-reload; rm -rf /opt/netflowAgent /etc/netflowAgent /var/log/netflowAgent' \
+  --ask-pass --ask-become-pass
+
+# Необязательно: удалить старый source checkout с endpoint.
+ansible linux_agents -b -m ansible.builtin.file \
+  -a "path=/home/kolix/nflowCapAgent state=absent" \
+  --ask-pass --ask-become-pass
+----
+
+Windows:
+
+[source,bash]
+----
+ansible windows_agents -m ansible.windows.win_service \
+  -a "name=netflowAgent state=absent" --ask-pass
+
+ansible windows_agents -m ansible.windows.win_file \
+  -a "path=C:/netflowAgent state=absent" --ask-pass
+
+ansible windows_agents -m ansible.windows.win_file \
+  -a "path=C:/ProgramData/netflowAgent state=absent" --ask-pass
+----
+
+Если в старом ручном дистрибутиве сохранились `uninstall-linux.sh --purge` или `uninstall-service.ps1 -PurgeFiles`, можно использовать их вместо прямой очистки. Ansible-роль сама эти uninstall-скрипты на endpoint не копирует.
+
+Для чистого теста коллектора после остановки агентов сбросьте только `win-pc01` и `ubuntu-pc01` по разделу link:nfsen-ng-install-ubuntu2404.adoc#clean-two-sources[Полный сброс данных двух тестовых источников]. Процесс `nfcapd` для других портов и источников не останавливайте.
+
+Если тестовые `nfcapd` запущены вручную с `-D`, а не через systemd:
+
+[source,bash]
+----
+pgrep -a nfcapd
+# Найдите PID только для -p 9995 и -p 9996. Не останавливайте отдельный :2055.
+sudo kill <PID-9995> <PID-9996>
+
+cd ~/nfsen-ng
+docker compose down
+sudo rm -rf /var/nfdump/profiles-data/live/{win-pc01,ubuntu-pc01}
+sudo mkdir -p /var/nfdump/profiles-data/live/{win-pc01,ubuntu-pc01}
+
+sudo nfcapd -w /var/nfdump/profiles-data/live/win-pc01 \
+  -z=lz4 -S 1 -p 9995 -D
+sudo nfcapd -w /var/nfdump/profiles-data/live/ubuntu-pc01 \
+  -z=lz4 -S 1 -p 9996 -D
+
+docker compose up -d
+pgrep -a nfcapd
+docker compose ps
+----
+
+== 6. Установка агентов
 
 Linux:
 
@@ -142,9 +254,11 @@ Playbook:
 * включает автозапуск, запускает агент и проверяет версию `0.3.1`.
 * через несколько секунд повторно проверяет, что служба не завершилась; Windows-службе задаются recovery/restart actions.
 
-Повторный запуск безопасен: Ansible меняет только отличающееся состояние.
+Для лаборатории запускайте ОС по очереди: Linux и Windows могут иметь разные пароли. В production используйте SSH-ключи и Ansible Vault; пароли в inventory и Git не сохраняйте.
 
-== 6. Проверка результата
+Повторный запуск той же команды является проверкой идемпотентности: ожидаются `failed=0` и в норме `changed=0`, потому что Ansible меняет только отличающееся состояние.
+
+== 7. Проверка результата
 
 [source,bash]
 ----
@@ -155,15 +269,54 @@ ansible windows_agents -m ansible.windows.win_service_info \
   -a "name=netflowAgent" --ask-pass
 ----
 
-На коллекторе после ротации проверяйте конкретные свежие файлы:
+Логи находятся в `/var/log/netflowAgent/agent.log` и `C:\ProgramData\netflowAgent\agent.log`. В них должны быть `IPFIX exporter ready`, правильные интерфейс, IP/порт коллектора и отсутствие ошибок захвата.
+
+Их можно прочитать удалённо:
 
 [source,bash]
 ----
-nfdump -r /var/nfdump/profiles-data/live/win-pc01/YYYY/MM/DD/nfcapd.YYYYMMDDhhmm \
-  -o extended 'proto tcp'
+ansible linux_agents -b -m ansible.builtin.shell \
+  -a "tail -n 20 /var/log/netflowAgent/agent.log" \
+  --ask-pass --ask-become-pass
 
-nfdump -r /var/nfdump/profiles-data/live/ubuntu-pc01/YYYY/MM/DD/nfcapd.YYYYMMDDhhmm \
-  -o extended 'proto tcp'
+ansible windows_agents -m ansible.windows.win_shell \
+  -a "Get-Content C:/ProgramData/netflowAgent/agent.log -Tail 20" \
+  --ask-pass
 ----
 
-Критерии: текущая дата, реальные IP/порты, непустые TCP flags и отсутствие записей `1970-01-01`/`0.0.x.x`.
+Создайте TCP-трафик к nfsen-ng:
+
+[source,bash]
+----
+# Linux endpoint
+curl -I http://192.168.30.36:9000
+----
+
+[source,powershell]
+----
+# Windows endpoint
+Invoke-WebRequest http://192.168.30.36:9000 -UseBasicParsing
+----
+
+Подождите inactive timeout и ротацию `nfcapd` (обычно до 5 минут). На коллекторе проверяйте конкретные свежие файлы:
+
+[source,bash]
+----
+find /var/nfdump/profiles-data/live/win-pc01 \
+  -type f -name 'nfcapd.20*' -printf '%T@ %p\n' | sort -nr | head -3
+
+find /var/nfdump/profiles-data/live/ubuntu-pc01 \
+  -type f -name 'nfcapd.20*' -printf '%T@ %p\n' | sort -nr | head -3
+
+nfdump -r /var/nfdump/profiles-data/live/win-pc01/YYYY/MM/DD/nfcapd.YYYYMMDDhhmm \
+  -o "fmt:%ts %sa:%sp -> %da:%dp %pr %fl" 'proto tcp'
+
+nfdump -r /var/nfdump/profiles-data/live/ubuntu-pc01/YYYY/MM/DD/nfcapd.YYYYMMDDhhmm \
+  -o "fmt:%ts %sa:%sp -> %da:%dp %pr %fl" 'proto tcp'
+----
+
+Критерии: текущая дата, адреса тестовых endpoint (`192.168.30.16` и `192.168.30.43`), реальные порты, `TCP`, непустые flags (`S`, `A`, `P`, `F` и их комбинации) и отсутствие записей `1970-01-01`/`0.0.x.x`/`INVALID`.
+
+Полная проверка IPFIX version 10, template 259 и TCP flags приведена в link:clean-reinstall-v0.3.1.adoc[приёмочном тесте v0.3.1].
+
+Проверенный лабораторный результат для v0.3.1: Linux `ok=14 changed=6 failed=0`, Windows `ok=16 changed=5 failed=0`. Количество `changed` может отличаться при повторном запуске; обязательны `unreachable=0` и `failed=0`.

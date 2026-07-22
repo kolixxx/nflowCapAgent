@@ -6,7 +6,7 @@
 :source-highlighter: highlight.js
 :experimental:
 :author: netflowAgent
-:revdate: 2026-07-04
+:revdate: 2026-07-22
 
 == Назначение документа
 
@@ -18,8 +18,8 @@
 
 [source,text]
 ----
-  win-pc01 (netflowAgent)  ──NetFlow v9 UDP :9995──►  nfcapd → live/win-pc01/
-  ubuntu-pc01 (агент)      ──NetFlow v9 UDP :9996──►  nfcapd → live/ubuntu-pc01/
+  win-pc01 (netflowAgent)  ──IPFIX UDP :9995──►  nfcapd → live/win-pc01/
+  ubuntu-pc01 (агент)      ──IPFIX UDP :9996──►  nfcapd → live/ubuntu-pc01/
                               │
                               ▼
                     nfsen-ng (Docker) → браузер :9000
@@ -40,7 +40,7 @@
 
 | netflowAgent (Rust)
 | Windows / Ubuntu endpoint
-| Сбор трафика, экспорт NetFlow v9 по UDP
+| Сбор трафика, экспорт IPFIX (рекомендуется) или NetFlow v9 по UDP
 
 | `nfcapd`
 | Ubuntu-коллектор (хост, не Docker)
@@ -673,7 +673,7 @@ sudo systemctl status nfcapd-win-pc01.service nfcapd-ubuntu-pc01.service
 
 == Шаг 8. Настройка endpoint-агентов (netflowAgent)
 
-Агент link:netflowAgent-design.adoc[netflowAgent] на каждом хосте отправляет NetFlow v9 на коллектор. IP сервера — из шага 1 (`ip -4 addr`).
+Агент link:netflowAgent-design.adoc[netflowAgent] на каждом хосте отправляет IPFIX (рекомендуется для v0.3.1+) или NetFlow v9 на коллектор. IP сервера — из шага 1 (`ip -4 addr`).
 
 * link:netflowAgent-install-windows.adoc[Установка на Windows (win-pc01)] — **Npcap** + агент + служба
 * link:netflowAgent-install-linux.adoc[Установка на Linux (ubuntu-pc01)] — **libpcap** + агент (в разработке)

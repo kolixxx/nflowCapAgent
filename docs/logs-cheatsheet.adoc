@@ -2,7 +2,7 @@
 :toc: left
 :toclevels: 2
 :sectnums:
-:revdate: 2026-07-06
+:revdate: 2026-07-22
 
 Краткий справочник: **где смотреть**, **что означает**, **что делать** при проблемах.
 
@@ -14,7 +14,7 @@
 ----
 Windows/Linux (netflowAgent)
     │  лог агента (консоль или файл)
-    │  NetFlow v9 UDP :9995 / :9996
+    │  IPFIX UDP :9995 / :9996
     ▼
 Ubuntu-коллектор (nfcapd)
     │  файлы nfcapd.* на диске
@@ -235,7 +235,7 @@ docker compose exec nfsen env | grep -E 'TZ|NFCAPD|NFSEN'
 | INFO
 | Старт OK; `target`, `version`, `interface`
 
-| `NetFlow v9 exporter ready`
+| `IPFIX exporter ready` (`NetFlow v9 exporter ready` при `format = "netflow9"`)
 | INFO
 | UDP на коллектор готов
 
