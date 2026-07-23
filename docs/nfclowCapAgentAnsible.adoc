@@ -9,6 +9,31 @@ Ansible запускается на отдельном Ubuntu control host и у
 
 Связанные инструкции: link:clean-reinstall-v0.3.1.adoc[чистая переустановка и приёмка], link:logs-cheatsheet.adoc[логи и диагностика], link:nfsen-ng-install-ubuntu2404.adoc[коллектор nfcapd/nfsen-ng].
 
+== Требования
+
+=== Ansible control host
+
+* Ubuntu 24.04 x86_64; для управления примерно 50 VM обычно достаточно 2 vCPU, 2–4 GB RAM и нескольких GB свободного диска.
+* Пользователь с `sudo`.
+* Python 3.12, `python3.12-venv`, Git и `sshpass` (последний нужен только при парольном SSH).
+* Python-пакеты `ansible-core >=2.16,<2.17` и `pywinrm`.
+* Ansible collection `ansible.windows` версии 2.8.0 из `requirements.yml`.
+* Доступ по HTTPS/443 к GitHub, PyPI и Ansible Galaxy либо внутренние зеркала этих ресурсов.
+* Сетевой доступ к Linux endpoint по TCP/22 и Windows endpoint по TCP/5986.
+* Репозиторий с обоими проверенными x86_64-артефактами:
+  `agent/dist/linux-x64/netflowAgent` и `agent/dist/win-x64/netflowAgent.exe`.
+
+Rust на Ansible-хосте и endpoint-машинах не требуется. Playbook намеренно не устанавливает Rust автоматически: несовместимый или повреждённый binary должен приводить к понятной ошибке, а новые артефакты собираются централизованно.
+
+=== Управляемые endpoint
+
+* Linux: x86_64, SSH, Python 3, пользователь с `sudo`; `libpcap0.8` установит роль.
+* Windows: x86_64, WinRM HTTPS/5986 и Npcap. Из-за лицензии Npcap устанавливается заранее, роль только проверяет его службу.
+* Endpoint должны достигать IPFIX-коллектора по UDP: Windows — порт 9995, Linux — порт 9996.
+* Для каждой машины заранее определяется правильный capture interface.
+
+Текущие роли до копирования проверяют наличие и SHA-256 артефакта, после установки — версию `0.3.1` и состояние службы. Автоматический rollback предыдущего binary пока не реализован.
+
 == Структура
 
 [source,text]
